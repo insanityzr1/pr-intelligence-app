@@ -8,7 +8,7 @@ import database
 router = APIRouter(prefix="/api/changelog", tags=["Changelog"])
 
 @router.get("")
-def get_past_changelogs():
+def get_changelogs():
     logs = database.get_changelogs()
     return {"changelogs": logs}
 
@@ -53,6 +53,6 @@ def generate_changelog(req: ChangelogRequest):
     }
 
 @router.delete("/{changelog_id}")
-def delete_past_changelog(changelog_id: int):
+def delete_changelog(changelog_id: int):
     database.delete_changelog(changelog_id)
     return {"status": "success", "id": changelog_id}

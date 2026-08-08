@@ -1,23 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { generateChangelog, fetchPastChangelogs, deletePastChangelog } from '../api/client';
+import { generateChangelog, fetchChangelogs, deleteChangelog } from '../api/client';
 import FormattedMarkdown from './FormattedMarkdown';
 
 export default function ReleaseBuilder({ prs }) {
   const [selectedPrs, setSelectedPrs] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [changelog, setChangelog] = useState(null);
-  const [pastChangelogs, setPastChangelogs] = useState([]);
-  const [activePastId, setActivePastId] = useState(null);
+  const [currentChangelog, setCurrentChangelog] = useState(null);
+  const [changelogs, setChangelogs] = useState([]);
+  const [activeChangelogId, setActiveChangelogId] = useState(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    loadPastChangelogs();
+    loadChangelogs();
   }, []);
 
-  async function loadPastChangelogs() {
+  async function loadChangelogs() {
     try {
-      const res = await fetchPastChangelogs();
-      setPastChangelogs(res.changelogs || []);
+      const res = await fetchChangelogs();
+      setChangelogs(res.changelogs || []);
     } catch (err) {
       console.error(err);
     }
@@ -63,12 +63,12 @@ export default function ReleaseBuilder({ prs }) {
   async function handleBuild() {
     if (selectedPrs.length === 0) return;
     setLoading(true);
-    setChangelog(null);
+    setCurrentChangelog(null);
     try {
       const data = await generateChangelog(selectedPrs);
-      setChangelog(data);
-      setActivePastId(data.id || null);
-      await loadPastChangelogs();
+      setCurrentChangelog(data);
+      setActiveChangelogId(data.id || null);
+      await loadChangelogs();
     } catch (err) {
       console.error(err);
     } finally {
@@ -76,19 +76,19 @@ export default function ReleaseBuilder({ prs }) {
     }
   }
 
-  function handleSelectPast(item) {
-    setActivePastId(item.id);
-    setChangelog(item);
+  function handleSelectChangelog(item) {
+    setActiveChangelogId(item.id);
+    setCurrentChangelog(item);
   }
 
-  async function handleDeletePast(e, id) {
+  async function handleDeleteChangelog(e, id) {
     e.stopPropagation();
     try {
-      await deletePastChangelog(id);
-      await loadPastChangelogs();
-      if (activePastId === id) {
-        setActivePastId(null);
-        setChangelog(null);
+      await deleteChangelog(id);
+      await loadChangelogs();
+      if (activeChangelogId === id) {
+        setActiveChangelogId(null);
+        setCurrentChangelog(null);
       }
     } catch (err) {
       console.error(err);
@@ -158,36 +158,36 @@ export default function ReleaseBuilder({ prs }) {
           </div>
         </div>
 
-        {/* Col 2: Condensed Past Generated Changelogs Sidebar */}
-        <div className="past-changelogs-sidebar">
-          <h3>📜 Saved Release Notes ({pastChangelogs.length})</h3>
-          <p className="sidebar-subtitle">Click any generated release to view draft markdown.</p>
+        {/* Col 2: Condensed Saved Changelogs Sidebar */}
+        <div className="changelogs-sidebar">
+          <h3>📜 Saved Changelogs ({changelogs.length})</h3>
+          <p className="sidebar-subtitle">Click any generated changelog to view release draft.</p>
           
-          {pastChangelogs.length === 0 ? (
-            <div className="empty-box">No saved release notes yet.</div>
+          {changelogs.length === 0 ? (
+            <div className="empty-box">No saved changelogs yet.</div>
           ) : (
-            <div className="past-changelogs-scroll">
-              {pastChangelogs.map(item => (
+            <div className="changelogs-scroll">
+              {changelogs.map(item => (
                 <div
                   key={item.id}
-                  className={`past-changelog-card ${activePastId === item.id ? 'active' : ''}`}
-                  onClick={() => handleSelectPast(item)}
+                  className={`changelog-card ${activeChangelogId === item.id ? 'active' : ''}`}
+                  onClick={() => handleSelectChangelog(item)}
                 >
-                  <div className="past-head">
-                    <strong className="past-title">{item.title}</strong>
+                  <div className="changelog-head">
+                    <strong className="changelog-title">{item.title}</strong>
                     <button
-                      onClick={e => handleDeletePast(e, item.id)}
+                      onClick={e => handleDeleteChangelog(e, item.id)}
                       className="btn-icon-danger"
-                      title="Delete draft"
+                      title="Delete changelog"
                     >
                       &times;
                     </button>
                   </div>
 
-                  <div className="past-meta">
-                    <span className="past-date">🕒 {item.created_at}</span>
+                  <div className="changelog-meta">
+                    <span className="changelog-date">🕒 {item.created_at}</span>
                     {item.branches?.length > 0 && (
-                      <span className="past-branches">🌿 {item.branches.join(', ')}</span>
+                      <span className="changelog-branches">🌿 {item.branches.join(', ')}</span>
                     )}
                   </div>
                 </div>
@@ -201,13 +201,13 @@ export default function ReleaseBuilder({ prs }) {
           <h3>Generated Release Draft Output</h3>
           {loading ? (
             <div className="loading">AI grouping PRs into release categories and writing release notes...</div>
-          ) : changelog ? (
+          ) : currentChangelog ? (
             <div className="markdown-box">
-              <FormattedMarkdown content={changelog.markdown || changelog.changelog || ''} />
+              <FormattedMarkdown content={currentChangelog.markdown || currentChangelog.changelog || ''} />
             </div>
           ) : (
             <div className="empty-box">
-              Select PRs on the left and click "Generate Changelog" or pick a saved release draft from the list.
+              Select PRs on the left and click "Generate Changelog" or pick a saved changelog from the list.
             </div>
           )}
         </div>

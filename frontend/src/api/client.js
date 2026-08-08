@@ -50,15 +50,15 @@ export async function generateChangelog(prNumbers) {
   return res.json();
 }
 
-export async function fetchPastChangelogs() {
+export async function fetchChangelogs() {
   const res = await fetch(`${API_BASE}/changelog`);
-  if (!res.ok) throw new Error('Failed to fetch past changelogs');
+  if (!res.ok) throw new Error('Failed to fetch changelogs');
   return res.json();
 }
 
-export async function deletePastChangelog(changelogId) {
+export async function deleteChangelog(changelogId) {
   const res = await fetch(`${API_BASE}/changelog/${changelogId}`, { method: 'DELETE' });
-  if (!res.ok) throw new Error('Failed to delete past changelog');
+  if (!res.ok) throw new Error('Failed to delete changelog');
   return res.json();
 }
 
