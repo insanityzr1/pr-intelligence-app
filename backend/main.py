@@ -1,4 +1,6 @@
+import argparse
 import os
+import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -7,12 +9,34 @@ from config import settings
 from database import init_db
 from routers import prs, conflicts, changelog, export, repos
 
+def parse_cli_args():
+    parser = argparse.ArgumentParser(description="PR Intelligence FastAPI Server")
+    parser.add_argument("--host", type=str, help="Host address to bind to (e.g. 0.0.0.0)")
+    parser.add_argument("--port", type=int, help="Port to bind server to (e.g. 8000)")
+    parser.add_argument("--reload", action="store_true", default=None, help="Enable auto-reload on code changes")
+    parser.add_argument("--debug", action="store_true", default=None, help="Enable debug mode")
+    parser.add_argument("--ai-provider", type=str, help="Preferred AI provider (auto, gemini, openai, anthropic, ollama)")
+    parser.add_argument("--db-path", type=str, help="Custom SQLite database file path")
+    parser.add_argument("--log-level", type=str, help="Logging level (info, debug, warning, error)")
+    
+    # Attempted protected field overrides (will trigger security warnings)
+    parser.add_argument("--app-env", type=str, help="Attempt override of protected APP_ENV field")
+    
+    return parser.parse_args()
+
+# Parse CLI args if running via python backend/main.py
+if __name__ == "__main__":
+    args = parse_cli_args()
+    cli_dict = vars(args)
+    settings.apply_cli_overrides(cli_dict)
+
 # Initialize DB tables & defaults
 init_db()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
+    debug=settings.DEBUG,
     description="FastAPI + React AI-Powered PR Intelligence Application"
 )
 
@@ -47,10 +71,12 @@ def read_root():
         "status": "online",
         "app": settings.PROJECT_NAME,
         "version": settings.VERSION,
+        "debug": settings.DEBUG,
         "docs": "/docs",
         "frontend": "Run Vite dev server or build frontend"
     }
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    print(f"Starting {settings.PROJECT_NAME} on {settings.HOST}:{settings.PORT} (Debug: {settings.DEBUG}, Provider: {settings.AI_PROVIDER})...")
+    uvicorn.run("main:app", host=settings.HOST, port=settings.PORT, reload=settings.RELOAD, log_level=settings.LOG_LEVEL.lower())
