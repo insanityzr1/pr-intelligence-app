@@ -306,11 +306,18 @@ td {
 .drawer-backdrop {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background-color: rgba(15, 23, 42, 0.75);
-  backdrop-filter: blur(4px);
+  background-color: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(6px);
   z-index: 1000;
   display: flex;
   justify-content: flex-end;
+  overflow: hidden;
+}
+
+.drawer-backdrop.modal-backdrop-center {
+  justify-content: center;
+  align-items: center;
+  padding: 2rem;
 }
 
 .drawer-content {
@@ -323,8 +330,23 @@ td {
   padding: 2rem;
 }
 
-.modal-narrow { max-width: 520px; height: auto; align-self: center; margin: 0 auto; border-radius: 0.75rem; }
-.modal-wide { max-width: 920px; height: auto; align-self: center; margin: 0 auto; border-radius: 0.75rem; }
+.modal-narrow, .modal-wide {
+  height: auto;
+  max-height: 88vh;
+  overflow-y: auto;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+}
+
+.modal-narrow {
+  max-width: 540px;
+  border-radius: 0.75rem;
+}
+
+.modal-wide {
+  max-width: 920px;
+  border-radius: 0.75rem;
+}
 
 .drawer-header {
   display: flex;
@@ -646,7 +668,8 @@ td {
 .step-group-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 0.5rem;
   margin-bottom: 0.5rem;
   padding-bottom: 0.5rem;
   border-bottom: 1px solid var(--border-color);
@@ -680,6 +703,7 @@ td {
   font-size: 0.75rem;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .btn-copy-sm:hover {
@@ -726,6 +750,7 @@ td {
   font-size: 0.75rem;
   cursor: pointer;
   margin-left: 0.5rem;
+  white-space: nowrap;
 }
 
 .btn-copy:hover { color: white; background-color: var(--accent-color); }

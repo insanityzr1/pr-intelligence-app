@@ -9,7 +9,12 @@ export default function RepoManagerModal({ onClose, onReposUpdated }) {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    document.body.style.overflow = 'hidden';
     loadRepos();
+
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
   }, []);
 
   async function loadRepos() {
@@ -52,7 +57,7 @@ export default function RepoManagerModal({ onClose, onReposUpdated }) {
   }
 
   return (
-    <div className="drawer-backdrop" onClick={onClose}>
+    <div className="drawer-backdrop modal-backdrop-center" onClick={onClose}>
       <div className="drawer-content modal-narrow" onClick={e => e.stopPropagation()}>
         <div className="drawer-header">
           <h2>⚙️ Repository Manager</h2>

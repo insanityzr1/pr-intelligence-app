@@ -14,10 +14,14 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
   const [sendingChat, setSendingChat] = useState(false);
 
   useEffect(() => {
+    document.body.style.overflow = 'hidden';
     if (prNumber) {
       loadDetail();
       loadChat();
     }
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
   }, [prNumber, repoName]);
 
   async function loadDetail() {

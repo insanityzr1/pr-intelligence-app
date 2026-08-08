@@ -7,7 +7,13 @@ export default function ConflictResolverModal({ prNumber, repoName, onClose }) {
   const [copiedKey, setCopiedKey] = useState(null);
 
   useEffect(() => {
+    // Prevent body background scroll while modal is open
+    document.body.style.overflow = 'hidden';
     if (prNumber) loadResolution();
+
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
   }, [prNumber]);
 
   async function loadResolution() {
@@ -29,7 +35,7 @@ export default function ConflictResolverModal({ prNumber, repoName, onClose }) {
   }
 
   return (
-    <div className="drawer-backdrop" onClick={onClose}>
+    <div className="drawer-backdrop modal-backdrop-center" onClick={onClose}>
       <div className="drawer-content modal-wide" onClick={e => e.stopPropagation()}>
         <div className="drawer-header">
           <div>
