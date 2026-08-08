@@ -71,9 +71,14 @@ def init_db():
         group_id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE,
         description TEXT DEFAULT '',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
+    try:
+        cursor.execute("ALTER TABLE pr_groups ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+    except Exception:
+        pass
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS pr_group_items (
@@ -271,14 +276,26 @@ def remove_pr_tag(pr_number: int, repo_name: str, tag: str):
 def get_groups():
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("""
-    SELECT g.group_id, g.name, g.description, g.created_at,
-           COUNT(i.pr_number) as item_count
-    FROM pr_groups g
-    LEFT JOIN pr_group_items i ON g.group_id = i.group_id
-    GROUP BY g.group_id
-    ORDER BY g.created_at DESC
-    """)
+    try:
+        cursor.execute("""
+        SELECT g.group_id, g.name, g.description, g.created_at,
+               COALESCE(g.updated_at, g.created_at) as updated_at,
+               COUNT(i.pr_number) as item_count
+        FROM pr_groups g
+        LEFT JOIN pr_group_items i ON g.group_id = i.group_id
+        GROUP BY g.group_id
+        ORDER BY updated_at DESC, g.group_id DESC
+        """)
+    except Exception:
+        cursor.execute("""
+        SELECT g.group_id, g.name, g.description, g.created_at,
+               g.created_at as updated_at,
+               COUNT(i.pr_number) as item_count
+        FROM pr_groups g
+        LEFT JOIN pr_group_items i ON g.group_id = i.group_id
+        GROUP BY g.group_id
+        ORDER BY g.created_at DESC, g.group_id DESC
+        """)
     rows = cursor.fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -290,6 +307,25 @@ def create_group(name: str, description: str = ""):
     INSERT INTO pr_groups (name, description) VALUES (?, ?)
     """, (name.strip(), description.strip()))
     group_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return {"group_id": group_id, "name": name, "description": description}
+
+def update_group(group_id: int, name: str, description: str = ""):
+    conn = get_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+        UPDATE pr_groups
+        SET name = ?, description = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE group_id = ?
+        """, (name.strip(), description.strip(), group_id))
+    except Exception:
+        cursor.execute("""
+        UPDATE pr_groups
+        SET name = ?, description = ?
+        WHERE group_id = ?
+        """, (name.strip(), description.strip(), group_id))
     conn.commit()
     conn.close()
     return {"group_id": group_id, "name": name, "description": description}
@@ -323,6 +359,10 @@ def add_prs_to_group(group_id: int, pr_numbers: list, repo_name: str):
         VALUES (?, ?, ?)
         ON CONFLICT(group_id, pr_number, repo_name) DO NOTHING
         """, (group_id, num, repo_name))
+    try:
+        cursor.execute("UPDATE pr_groups SET updated_at = CURRENT_TIMESTAMP WHERE group_id = ?", (group_id,))
+    except Exception:
+        pass
     conn.commit()
     conn.close()
     return get_group_items(group_id)
@@ -331,6 +371,10 @@ def remove_pr_from_group(group_id: int, pr_number: int, repo_name: str):
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM pr_group_items WHERE group_id = ? AND pr_number = ? AND repo_name = ?", (group_id, pr_number, repo_name))
+    try:
+        cursor.execute("UPDATE pr_groups SET updated_at = CURRENT_TIMESTAMP WHERE group_id = ?", (group_id,))
+    except Exception:
+        pass
     conn.commit()
     conn.close()
     return get_group_items(group_id)

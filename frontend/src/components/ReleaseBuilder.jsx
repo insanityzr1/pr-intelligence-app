@@ -1,18 +1,56 @@
 import React, { useState, useEffect } from 'react';
-import { generateChangelog, fetchChangelogs, deleteChangelog } from '../api/client';
+import { generateChangelog, fetchChangelogs, deleteChangelog, fetchGroups, fetchGroupItems, createGroup } from '../api/client';
 import FormattedMarkdown from './FormattedMarkdown';
 
 export default function ReleaseBuilder({ prs }) {
-  const [selectedPrs, setSelectedPrs] = useState([]);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [groups, setGroups] = useState([]);
+  const [activeGroupId, setActiveGroupId] = useState(null);
+  const [activeItems, setActiveItems] = useState([]);
+  
+  // Inline workspace creation state
+  const [newGroupName, setNewGroupName] = useState('');
+  const [creatingGroup, setCreatingGroup] = useState(false);
+
+  // Changelog states
   const [currentChangelog, setCurrentChangelog] = useState(null);
   const [changelogs, setChangelogs] = useState([]);
   const [activeChangelogId, setActiveChangelogId] = useState(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    loadGroups();
     loadChangelogs();
   }, []);
+
+  useEffect(() => {
+    if (activeGroupId) {
+      loadGroupItems(activeGroupId);
+    } else {
+      setActiveItems([]);
+    }
+  }, [activeGroupId]);
+
+  async function loadGroups() {
+    try {
+      const data = await fetchGroups();
+      const loadedGroups = data.groups || [];
+      setGroups(loadedGroups);
+      if (loadedGroups.length > 0 && !activeGroupId) {
+        setActiveGroupId(loadedGroups[0].group_id);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function loadGroupItems(gId) {
+    try {
+      const data = await fetchGroupItems(gId);
+      setActiveItems(data.items || []);
+    } catch (err) {
+      console.error(err);
+    }
+  }
 
   async function loadChangelogs() {
     try {
@@ -23,49 +61,34 @@ export default function ReleaseBuilder({ prs }) {
     }
   }
 
-  // Typeahead search filtering
-  const filteredPrs = prs.filter(pr => {
-    if (!searchQuery.trim()) return true;
-    const q = searchQuery.trim().toLowerCase();
-    
-    if (q.startsWith('#')) {
-      const numStr = q.replace('#', '');
-      return pr.number.toString().includes(numStr);
-    }
-    
-    return (
-      pr.title.toLowerCase().includes(q) ||
-      (pr.headRefName && pr.headRefName.toLowerCase().includes(q)) ||
-      (pr.baseRefName && pr.baseRefName.toLowerCase().includes(q)) ||
-      pr.author.toLowerCase().includes(q) ||
-      pr.number.toString().includes(q)
-    );
-  });
-
-  function togglePr(num) {
-    if (selectedPrs.includes(num)) {
-      setSelectedPrs(selectedPrs.filter(n => n !== num));
-    } else {
-      setSelectedPrs([...selectedPrs, num]);
+  async function handleCreateGroup(e) {
+    e.preventDefault();
+    if (!newGroupName.trim()) return;
+    setCreatingGroup(true);
+    try {
+      const res = await createGroup(newGroupName.trim());
+      setNewGroupName('');
+      await loadGroups();
+      if (res.group?.group_id) {
+        setActiveGroupId(res.group.group_id);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setCreatingGroup(false);
     }
   }
 
-  function selectFiltered() {
-    const filteredNums = filteredPrs.map(p => p.number);
-    const combined = Array.from(new Set([...selectedPrs, ...filteredNums]));
-    setSelectedPrs(combined);
-  }
-
-  function clearAll() {
-    setSelectedPrs([]);
-  }
+  const activeGroup = groups.find(g => g.group_id === activeGroupId);
+  const activePrObjects = prs ? prs.filter(p => activeItems.some(i => i.pr_number === (p.number ?? p.pr_number))) : [];
 
   async function handleBuild() {
-    if (selectedPrs.length === 0) return;
+    if (activeItems.length === 0) return;
     setLoading(true);
     setCurrentChangelog(null);
+    const prNums = activeItems.map(i => i.pr_number);
     try {
-      const data = await generateChangelog(selectedPrs);
+      const data = await generateChangelog(prNums, activeGroup?.name || null);
       setCurrentChangelog(data);
       setActiveChangelogId(data.id || null);
       await loadChangelogs();
@@ -100,65 +123,91 @@ export default function ReleaseBuilder({ prs }) {
       <div className="panel-header">
         <div>
           <h2>AI Release Builder & Changelog Generator</h2>
-          <p>Filter PRs using typeahead search, select feature candidates, and generate automated release notes.</p>
+          <p>Generate automated AI release notes for your PR Workspaces in one click.</p>
         </div>
 
         <div className="button-bar">
-          <button onClick={selectFiltered} className="btn btn-secondary btn-sm">
-            Select Filtered ({filteredPrs.length})
-          </button>
-          <button onClick={clearAll} className="btn btn-secondary btn-sm">Clear Selection</button>
-          <button onClick={handleBuild} disabled={selectedPrs.length === 0 || loading} className="btn btn-primary">
-            {loading ? 'Building Release Notes...' : `Generate Changelog (${selectedPrs.length} Selected)`}
+          <button
+            onClick={handleBuild}
+            disabled={!activeGroup || activeItems.length === 0 || loading}
+            className="btn btn-primary"
+          >
+            {loading ? 'Building Release Notes...' : `Generate Changelog (${activeItems.length} PRs)`}
           </button>
         </div>
       </div>
 
       <div className="builder-layout-three-col">
-        {/* Col 1: PR Selection List with Typeahead */}
+        {/* Col 1: PR Workspace Picker & PR Items */}
         <div className="pr-selector-list">
-          <div className="typeahead-container">
-            <label className="typeahead-label">Search & Filter PRs for Release</label>
-            <div className="typeahead-input-wrapper">
+          <div className="workspace-selector-box">
+            <label className="typeahead-label">Select PR Workspace</label>
+            {groups.length === 0 ? (
+              <div className="empty-box">No PR Workspaces found. Create one below!</div>
+            ) : (
+              <select
+                value={activeGroupId || ''}
+                onChange={e => setActiveGroupId(Number(e.target.value))}
+                className="add-pr-select"
+                style={{ width: '100%', marginBottom: '12px' }}
+              >
+                {groups.map(g => (
+                  <option key={g.group_id} value={g.group_id}>
+                    📦 {g.name} ({g.item_count || 0} PRs)
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {/* Inline Quick Workspace Creator */}
+            <form onSubmit={handleCreateGroup} className="create-group-form" style={{ marginTop: '8px' }}>
               <input
                 type="text"
-                placeholder="Type PR title, branch name, author, or '#1874'..."
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                className="typeahead-input"
+                placeholder="New Workspace Name..."
+                value={newGroupName}
+                onChange={e => setNewGroupName(e.target.value)}
+                disabled={creatingGroup}
               />
-              {searchQuery && (
-                <button className="clear-search-btn" onClick={() => setSearchQuery('')}>&times;</button>
-              )}
-            </div>
-            <span className="results-count">Showing {filteredPrs.length} of {prs.length} PRs</span>
+              <button
+                type="submit"
+                className="btn btn-secondary btn-sm"
+                disabled={creatingGroup || !newGroupName.trim()}
+              >
+                {creatingGroup ? 'Creating...' : '+ New Workspace'}
+              </button>
+            </form>
           </div>
 
-          <div className="pr-checkbox-scroll">
-            {filteredPrs.length === 0 ? (
-              <div className="empty-box">No PRs match your search query '{searchQuery}'.</div>
-            ) : (
-              filteredPrs.map(pr => (
-                <label key={pr.number} className={`pr-checkbox-item ${selectedPrs.includes(pr.number) ? 'selected' : ''}`}>
-                  <input
-                    type="checkbox"
-                    checked={selectedPrs.includes(pr.number)}
-                    onChange={() => togglePr(pr.number)}
-                  />
-                  <div className="info">
-                    <div className="pr-checkbox-head">
-                      <strong>#{pr.number}: {pr.title}</strong>
-                      <span className="branch-badge">{pr.headRefName || 'feature'} ➜ {pr.baseRefName || 'main'}</span>
+          <div className="workspace-items-container" style={{ marginTop: '16px' }}>
+            <h4 style={{ margin: '8px 0', fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+              PRs in {activeGroup ? `'${activeGroup.name}'` : 'Selected Workspace'} ({activePrObjects.length})
+            </h4>
+
+            <div className="pr-checkbox-scroll">
+              {!activeGroup ? (
+                <div className="empty-box">Select or create a PR Workspace to view items.</div>
+              ) : activePrObjects.length === 0 ? (
+                <div className="empty-box">
+                  No PRs added to '{activeGroup.name}' yet. Head over to the PR Workspaces tab to add PRs!
+                </div>
+              ) : (
+                activePrObjects.map(pr => (
+                  <div key={pr.number} className="pr-checkbox-item selected" style={{ cursor: 'default' }}>
+                    <div className="info">
+                      <div className="pr-checkbox-head">
+                        <strong>#{pr.number}: {pr.title}</strong>
+                        <span className="branch-badge">{pr.headRefName || pr.head_branch || 'feature'} ➜ {pr.baseRefName || pr.base_branch || 'main'}</span>
+                      </div>
+                      <span className="pr-type-meta">Author: @{pr.author} | Status: {pr.status} | Risk: {pr.risk}</span>
                     </div>
-                    <span className="pr-type-meta">Author: @{pr.author} | {pr.type} / {pr.subtype}</span>
                   </div>
-                </label>
-              ))
-            )}
+                ))
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Col 2: Condensed Saved Changelogs Sidebar */}
+        {/* Col 2: Saved Changelogs Sidebar */}
         <div className="changelogs-sidebar">
           <h3>📜 Saved Changelogs ({changelogs.length})</h3>
           <p className="sidebar-subtitle">Click any generated changelog to view release draft.</p>
@@ -207,7 +256,7 @@ export default function ReleaseBuilder({ prs }) {
             </div>
           ) : (
             <div className="empty-box">
-              Select PRs on the left and click "Generate Changelog" or pick a saved changelog from the list.
+              Select a PR Workspace on the left and click "Generate Changelog" or pick a saved changelog from the list.
             </div>
           )}
         </div>
