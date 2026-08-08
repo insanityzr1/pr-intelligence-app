@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { fetchPRs, syncPRs, fetchRepos } from './api/client';
+import Sidebar from './components/Sidebar';
+import TopHeader from './components/TopHeader';
 import MetricsBar from './components/MetricsBar';
 import PRMatrix from './components/PRMatrix';
 import PRDetailDrawer from './components/PRDetailDrawer';
@@ -22,6 +24,45 @@ export default function App() {
   
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+
+  // Layout & Navigation State
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    return localStorage.getItem('pr_app_sidebar_collapsed') === 'true';
+  });
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Persist sidebar collapsed state
+  useEffect(() => {
+    localStorage.setItem('pr_app_sidebar_collapsed', isSidebarCollapsed);
+  }, [isSidebarCollapsed]);
+
+  // Global Keyboard Shortcuts
+  useEffect(() => {
+    function handleKeyDown(e) {
+      // Ignore shortcut keypresses inside text inputs or textareas
+      const tag = e.target.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) {
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        setIsSidebarCollapsed(prev => !prev);
+      } else if (e.key === '1') {
+        setActiveTab('matrix');
+      } else if (e.key === '2') {
+        setActiveTab('conflicts');
+      } else if (e.key === '3') {
+        setActiveTab('workspaces');
+      } else if (e.key === '4') {
+        setActiveTab('release');
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     loadRepos();
@@ -61,84 +102,101 @@ export default function App() {
     }
   }
 
+  // Filter PRs by search query
+  const filteredPrs = useMemo(() => {
+    if (!searchQuery.trim()) return prs;
+    const query = searchQuery.toLowerCase().trim();
+    return prs.filter(p => {
+      const titleMatch = p.title?.toLowerCase().includes(query);
+      const authorMatch = p.author?.toLowerCase().includes(query);
+      const numMatch = String(p.pr_number).includes(query);
+      const repoMatch = p.repo_name?.toLowerCase().includes(query);
+      const branchMatch = p.head_branch?.toLowerCase().includes(query) || p.base_branch?.toLowerCase().includes(query);
+      const tagsMatch = p.tags?.some(t => t.toLowerCase().includes(query));
+
+      return titleMatch || authorMatch || numMatch || repoMatch || branchMatch || tagsMatch;
+    });
+  }, [prs, searchQuery]);
+
   return (
-    <div className="app-container">
-      <header className="app-header">
-        <div className="brand">
-          <h1>⚡ PR Intelligence App</h1>
-          <p>Multi-Repo AI Code Review, Conflict Resolver & Release Builder</p>
-        </div>
+    <div className={`app-shell ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      {/* Left Collapsible Navigation Sidebar */}
+      <Sidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        isCollapsed={isSidebarCollapsed}
+        setIsCollapsed={setIsSidebarCollapsed}
+        mobileOpen={mobileOpen}
+        setMobileOpen={setMobileOpen}
+        repos={repos}
+        selectedRepo={selectedRepo}
+        setSelectedRepo={setSelectedRepo}
+        onManageRepos={() => setShowRepoManager(true)}
+        handleSync={handleSync}
+        syncing={syncing}
+      />
 
-        <div className="repo-selector-group">
-          <select value={selectedRepo} onChange={e => setSelectedRepo(e.target.value)} className="repo-select">
-            <option value="">All Repositories ({repos.length})</option>
-            {repos.map(r => <option key={r.repo_name} value={r.repo_name}>{r.repo_name}</option>)}
-          </select>
-          <button onClick={() => setShowRepoManager(true)} className="btn btn-secondary btn-sm">⚙️ Manage Repos</button>
-        </div>
+      {/* Main Viewport Workspace */}
+      <div className="main-viewport">
+        {/* Pinned Top Workspace Header */}
+        <TopHeader
+          activeTab={activeTab}
+          selectedRepo={selectedRepo}
+          prs={prs}
+          onMobileMenuToggle={() => setMobileOpen(true)}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+        />
 
-        <div className="nav-tabs">
-          <button className={`tab-btn ${activeTab === 'matrix' ? 'active' : ''}`} onClick={() => setActiveTab('matrix')}>PR Matrix</button>
-          <button className={`tab-btn ${activeTab === 'conflicts' ? 'active' : ''}`} onClick={() => setActiveTab('conflicts')}>Collision Matrix</button>
-          <button className={`tab-btn ${activeTab === 'workspaces' ? 'active' : ''}`} onClick={() => setActiveTab('workspaces')}>📦 PR Workspaces</button>
-          <button className={`tab-btn ${activeTab === 'release' ? 'active' : ''}`} onClick={() => setActiveTab('release')}>Release Builder</button>
-        </div>
+        {loading ? (
+          <div className="loading-state-container">
+            <div className="loading-spinner">⚡</div>
+            <p>Fetching multi-repo pull request intelligence...</p>
+          </div>
+        ) : (
+          <main className="app-main">
+            {activeTab === 'matrix' && (
+              <PRMatrix prs={filteredPrs} onSelectPr={num => setSelectedPrNumber(num)} />
+            )}
 
-        <div className="header-actions">
-          <button onClick={handleSync} disabled={syncing} className="btn btn-primary">
-            {syncing ? 'Syncing GitHub...' : 'Sync PRs Now'}
-          </button>
-          <a href="/api/export/csv" download className="btn btn-secondary">Export CSV</a>
-        </div>
-      </header>
+            {activeTab === 'conflicts' && (
+              <ConflictMap />
+            )}
 
-      {loading ? (
-        <div className="loading-state">Loading Pull Request data...</div>
-      ) : (
-        <main className="app-main">
-          <MetricsBar prs={prs} />
+            {activeTab === 'workspaces' && (
+              <StagingWorkspacesTab prs={filteredPrs} onSelectPr={num => setSelectedPrNumber(num)} />
+            )}
 
-          {activeTab === 'matrix' && (
-            <PRMatrix prs={prs} onSelectPr={num => setSelectedPrNumber(num)} />
-          )}
+            {activeTab === 'release' && (
+              <ReleaseBuilder prs={filteredPrs} />
+            )}
 
-          {activeTab === 'conflicts' && (
-            <ConflictMap />
-          )}
+            {selectedPrNumber && (
+              <PRDetailDrawer
+                prNumber={selectedPrNumber}
+                repoName={selectedRepo}
+                onClose={() => setSelectedPrNumber(null)}
+                onResolveConflict={(num, repo) => setConflictResolverPr({ prNumber: num, repoName: repo })}
+              />
+            )}
 
-          {activeTab === 'workspaces' && (
-            <StagingWorkspacesTab prs={prs} onSelectPr={num => setSelectedPrNumber(num)} />
-          )}
+            {conflictResolverPr && (
+              <ConflictResolverModal
+                prNumber={conflictResolverPr.prNumber}
+                repoName={conflictResolverPr.repoName}
+                onClose={() => setConflictResolverPr(null)}
+              />
+            )}
 
-          {activeTab === 'release' && (
-            <ReleaseBuilder prs={prs} />
-          )}
-
-          {selectedPrNumber && (
-            <PRDetailDrawer
-              prNumber={selectedPrNumber}
-              repoName={selectedRepo}
-              onClose={() => setSelectedPrNumber(null)}
-              onResolveConflict={(num, repo) => setConflictResolverPr({ prNumber: num, repoName: repo })}
-            />
-          )}
-
-          {conflictResolverPr && (
-            <ConflictResolverModal
-              prNumber={conflictResolverPr.prNumber}
-              repoName={conflictResolverPr.repoName}
-              onClose={() => setConflictResolverPr(null)}
-            />
-          )}
-
-          {showRepoManager && (
-            <RepoManagerModal
-              onClose={() => setShowRepoManager(false)}
-              onReposUpdated={() => { loadRepos(); loadPrs(); }}
-            />
-          )}
-        </main>
-      )}
+            {showRepoManager && (
+              <RepoManagerModal
+                onClose={() => setShowRepoManager(false)}
+                onReposUpdated={() => { loadRepos(); loadPrs(); }}
+              />
+            )}
+          </main>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { fetchTagsMap } from '../api/client';
+import PRCommandBar from './PRCommandBar';
 
 export default function PRMatrix({ prs, onSelectPr }) {
   const [search, setSearch] = useState('');
@@ -10,6 +11,14 @@ export default function PRMatrix({ prs, onSelectPr }) {
   const [riskFilter, setRiskFilter] = useState('');
   const [actionFilter, setActionFilter] = useState('');
   const [tagFilter, setTagFilter] = useState('');
+
+  // Interactive KPI Multi-Select Filters
+  const [activeKpis, setActiveKpis] = useState({
+    mergeable: false,
+    conflicts: false,
+    highRisk: false,
+    aiAnalyzed: false
+  });
 
   const [tagsMap, setTagsMap] = useState({});
   const [sortKey, setSortKey] = useState('updated_at');
@@ -26,6 +35,34 @@ export default function PRMatrix({ prs, onSelectPr }) {
     } catch (err) {
       console.error(err);
     }
+  }
+
+  function toggleKpi(key) {
+    setActiveKpis(prev => ({
+      ...prev,
+      [key]: !prev[key]
+    }));
+  }
+
+  function resetKpis() {
+    setActiveKpis({
+      mergeable: false,
+      conflicts: false,
+      highRisk: false,
+      aiAnalyzed: false
+    });
+  }
+
+  function clearAllFilters() {
+    setSearch('');
+    setStatusFilter('');
+    setTypeFilter('');
+    setSubtypeFilter('');
+    setCurrStatusFilter('');
+    setRiskFilter('');
+    setActionFilter('');
+    setTagFilter('');
+    resetKpis();
   }
 
   const statuses = Array.from(new Set(prs.map(p => p.status))).sort();
@@ -58,7 +95,14 @@ export default function PRMatrix({ prs, onSelectPr }) {
     const mAction = !actionFilter || pr.rec_action === actionFilter;
     const mTag = !tagFilter || prTags.includes(tagFilter);
 
-    return mSearch && mStatus && mType && mSubtype && mCurrStatus && mRisk && mAction && mTag;
+    // KPI Multi-select Filters
+    let mKpi = true;
+    if (activeKpis.mergeable && pr.mergeable !== 'MERGEABLE') mKpi = false;
+    if (activeKpis.conflicts && pr.mergeable !== 'CONFLICTING') mKpi = false;
+    if (activeKpis.highRisk && pr.risk !== 'High') mKpi = false;
+    if (activeKpis.aiAnalyzed && !pr.ai_review) mKpi = false;
+
+    return mSearch && mStatus && mType && mSubtype && mCurrStatus && mRisk && mAction && mTag && mKpi;
   });
 
   const sorted = [...filtered].sort((a, b) => {
@@ -82,113 +126,113 @@ export default function PRMatrix({ prs, onSelectPr }) {
 
   return (
     <div className="matrix-wrapper">
-      <div className="filter-panel">
-        <h2>Filter & Search PRs</h2>
-        <div className="filters-grid">
-          <div className="filter-group">
-            <label>Search Text</label>
-            <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search PR ID, title, summary..." />
-          </div>
-          <div className="filter-group">
-            <label>Filter by Tag / Flag</label>
-            <select value={tagFilter} onChange={e => setTagFilter(e.target.value)}>
-              <option value="">All Tags & Flags ({availableTags.length})</option>
-              {availableTags.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-          <div className="filter-group">
-            <label>Status</label>
-            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-              <option value="">All Statuses</option>
-              {statuses.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
-          <div className="filter-group">
-            <label>Type</label>
-            <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}>
-              <option value="">All Types</option>
-              {types.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
-          </div>
-          <div className="filter-group">
-            <label>Subtype</label>
-            <select value={subtypeFilter} onChange={e => setSubtypeFilter(e.target.value)}>
-              <option value="">All Subtypes</option>
-              {subtypes.map(st => <option key={st} value={st}>{st}</option>)}
-            </select>
-          </div>
-          <div className="filter-group">
-            <label>Current Status</label>
-            <select value={currStatusFilter} onChange={e => setCurrStatusFilter(e.target.value)}>
-              <option value="">All Current Statuses</option>
-              {currStatuses.map(cs => <option key={cs} value={cs}>{cs}</option>)}
-            </select>
-          </div>
-          <div className="filter-group">
-            <label>Risk Level</label>
-            <select value={riskFilter} onChange={e => setRiskFilter(e.target.value)}>
-              <option value="">All Risk Levels</option>
-              {risks.map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
-          </div>
-          <div className="filter-group">
-            <label>Recommended Action</label>
-            <select value={actionFilter} onChange={e => setActionFilter(e.target.value)}>
-              <option value="">All Actions</option>
-              {actions.map(a => <option key={a} value={a}>{a}</option>)}
-            </select>
-          </div>
-        </div>
-      </div>
+      {/* Condensed PR Command Bar (KPI Stat Chips + Search + Popover Filters) */}
+      <PRCommandBar
+        prs={prs}
+        search={search}
+        setSearch={setSearch}
+        activeKpis={activeKpis}
+        toggleKpi={toggleKpi}
+        resetKpis={resetKpis}
+        tagFilter={tagFilter} setTagFilter={setTagFilter}
+        statusFilter={statusFilter} setStatusFilter={setStatusFilter}
+        typeFilter={typeFilter} setTypeFilter={setTypeFilter}
+        subtypeFilter={subtypeFilter} setSubtypeFilter={setSubtypeFilter}
+        currStatusFilter={currStatusFilter} setCurrStatusFilter={setCurrStatusFilter}
+        riskFilter={riskFilter} setRiskFilter={setRiskFilter}
+        actionFilter={actionFilter} setActionFilter={setActionFilter}
+        availableTags={availableTags}
+        statuses={statuses}
+        types={types}
+        subtypes={subtypes}
+        currStatuses={currStatuses}
+        risks={risks}
+        actions={actions}
+        clearAllFilters={clearAllFilters}
+      />
 
       <div className="table-container">
         <table>
           <thead>
             <tr>
-              <th onClick={() => handleSort('number')}>PR ID {sortKey === 'number' && (sortDir === 'asc' ? '▲' : '▼')}</th>
-              <th onClick={() => handleSort('updated_at')}>Last Updated {sortKey === 'updated_at' && (sortDir === 'asc' ? '▲' : '▼')}</th>
-              <th onClick={() => handleSort('title')}>Title, Flags & Summary {sortKey === 'title' && (sortDir === 'asc' ? '▲' : '▼')}</th>
-              <th onClick={() => handleSort('status')}>Status {sortKey === 'status' && (sortDir === 'asc' ? '▲' : '▼')}</th>
-              <th onClick={() => handleSort('type')}>Type {sortKey === 'type' && (sortDir === 'asc' ? '▲' : '▼')}</th>
-              <th onClick={() => handleSort('subtype')}>Subtype {sortKey === 'subtype' && (sortDir === 'asc' ? '▲' : '▼')}</th>
-              <th onClick={() => handleSort('current_status')}>Current Status {sortKey === 'current_status' && (sortDir === 'asc' ? '▲' : '▼')}</th>
-              <th onClick={() => handleSort('risk_score')}>Risk {sortKey === 'risk_score' && (sortDir === 'asc' ? '▲' : '▼')}</th>
-              <th onClick={() => handleSort('rec_action')}>Action {sortKey === 'rec_action' && (sortDir === 'asc' ? '▲' : '▼')}</th>
+              <th onClick={() => handleSort('number')} className="sortable">
+                PR ID {sortKey === 'number' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+              </th>
+              <th onClick={() => handleSort('updated_at')} className="sortable">
+                Last Updated {sortKey === 'updated_at' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+              </th>
+              <th onClick={() => handleSort('title')} className="sortable">
+                Title, Flags & Summary {sortKey === 'title' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+              </th>
+              <th onClick={() => handleSort('status')} className="sortable">
+                Status {sortKey === 'status' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+              </th>
+              <th onClick={() => handleSort('type')} className="sortable">
+                Type {sortKey === 'type' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+              </th>
+              <th onClick={() => handleSort('subtype')} className="sortable">
+                Subtype {sortKey === 'subtype' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+              </th>
+              <th onClick={() => handleSort('current_status')} className="sortable">
+                Current Status {sortKey === 'current_status' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+              </th>
+              <th onClick={() => handleSort('risk_score')} className="sortable">
+                Risk {sortKey === 'risk_score' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+              </th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody>
             {sorted.length === 0 ? (
-              <tr><td colSpan="9" className="empty-cell">No matching pull requests found.</td></tr>
+              <tr>
+                <td colSpan="9" className="no-data">
+                  No Pull Requests match the selected filters.
+                </td>
+              </tr>
             ) : (
               sorted.map(pr => {
-                const prKey = `${pr.repo_name}#${pr.number}`;
-                const rowTags = tagsMap[prKey] || [];
+                const key = `${pr.repo_name}#${pr.number}`;
+                const prTags = tagsMap[key] || [];
+
                 return (
-                  <tr key={pr.number} onClick={() => onSelectPr(pr.number)} className="clickable-row">
-                    <td><a className="pr-link" href={pr.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>{pr.id_str}</a></td>
-                    <td className="updated-cell">{pr.updated_rel}</td>
-                    <td>
-                      <div className="pr-title">{pr.title}</div>
-                      {rowTags.length > 0 && (
-                        <div className="row-tags-list">
-                          {rowTags.map(t => <span key={t} className="row-tag-badge">{t}</span>)}
+                  <tr key={key} onClick={() => onSelectPr(pr.number)} className="pr-row">
+                    <td className="pr-id-cell">
+                      <span className="pr-num">PR #{pr.number}</span>
+                      {pr.repo_name && <span className="repo-badge">{pr.repo_name}</span>}
+                    </td>
+                    <td className="updated-cell">{pr.updated_at_human}</td>
+                    <td className="title-summary-cell">
+                      <div className="pr-title-row">
+                        <span className="pr-title">{pr.title}</span>
+                      </div>
+                      {prTags.length > 0 && (
+                        <div className="pr-tags-list">
+                          {prTags.map(tag => (
+                            <span key={tag} className="pr-tag-pill">🏷️ {tag}</span>
+                          ))}
                         </div>
                       )}
                       <div className="pr-summary">{pr.summary}</div>
-                      <div className="pr-created">Created: {pr.created_fmt}</div>
+                      <div className="pr-author-meta">Created: {pr.created_at_human}</div>
                     </td>
                     <td>
-                      <span className={`badge ${pr.status === 'Draft' ? 'badge-draft' : 'badge-open'}`}>{pr.status}</span>
+                      <span className={`status-badge ${pr.status.toLowerCase()}`}>{pr.status}</span>
                     </td>
                     <td>{pr.type}</td>
                     <td>{pr.subtype}</td>
                     <td>
-                      <span className={`badge ${pr.mergeable === 'CONFLICTING' ? 'badge-conflict' : (pr.current_status === 'Ready to merge' ? 'badge-ready' : 'badge-review')}`}>
-                        {pr.mergeable === 'CONFLICTING' ? '⚠️ Conflicts' : pr.current_status}
+                      <span className={`curr-status-badge ${pr.current_status.toLowerCase().replace(/\s+/g, '-')}`}>
+                        {pr.current_status}
                       </span>
                     </td>
-                    <td className={`risk-${pr.risk.toLowerCase()}`}>{pr.risk_detail}</td>
-                    <td>{pr.rec_action}</td>
+                    <td>
+                      <span className={`risk-badge ${pr.risk.toLowerCase()}`}>
+                        {pr.risk_desc || pr.risk}
+                      </span>
+                    </td>
+                    <td className="action-cell">
+                      <span className="action-label">{pr.rec_action}</span>
+                    </td>
                   </tr>
                 );
               })
