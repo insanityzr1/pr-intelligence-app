@@ -29,9 +29,10 @@ class Settings:
     # Preferred Provider (auto, gemini, openai, anthropic, ollama)
     AI_PROVIDER: str = os.getenv("AI_PROVIDER", "auto").lower()
     
-    # Defaults
+    # Application Fetch Limits & Defaults
+    PR_FETCH_LIMIT: int = int(os.getenv("PR_FETCH_LIMIT", 100))
     DEFAULT_REPO: str = os.getenv("DEFAULT_REPO", "rpnunez/wp-ai-scheduler")
-    DEFAULT_PR_COUNT: int = int(os.getenv("DEFAULT_PR_COUNT", 40))
+    DEFAULT_PR_COUNT: int = int(os.getenv("DEFAULT_PR_COUNT", 100))
     DEFAULT_ORDERBY: str = os.getenv("DEFAULT_ORDERBY", "updated-desc")
     DB_PATH: str = os.getenv("DB_PATH", "pr_intelligence.db")
     
@@ -59,7 +60,6 @@ class Settings:
                 continue
                 
             if hasattr(self, attr_name):
-                # Type casting match
                 current_val = getattr(self, attr_name)
                 if isinstance(current_val, bool) and not isinstance(val, bool):
                     casted_val = str(val).lower() in ("true", "1", "yes")

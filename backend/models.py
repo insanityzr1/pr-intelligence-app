@@ -30,7 +30,7 @@ class PRSummaryItem(BaseModel):
     ai_review: Optional[dict] = None
 
 class SyncRequest(BaseModel):
-    count: int = 40
+    count: Optional[int] = None
     state: str = "open"
     orderby: str = "updated-desc"
     repo_name: Optional[str] = None
@@ -40,12 +40,9 @@ class AnalyzeRequest(BaseModel):
     force: bool = False
     repo_name: Optional[str] = None
 
-class ChangelogRequest(BaseModel):
-    pr_numbers: List[int]
-
 class RepoAddRequest(BaseModel):
     repo_name: str
 
 class ChatMessageRequest(BaseModel):
     message: str
-    repo_name: Optional[str] = "rpnunez/wp-ai-scheduler"
+    repo_name: Optional[str] = None

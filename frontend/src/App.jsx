@@ -51,7 +51,7 @@ export default function App() {
   async function handleSync() {
     setSyncing(true);
     try {
-      const res = await syncPRs(50, 'open', 'updated-desc', selectedRepo || null);
+      const res = await syncPRs(null, 'open', 'updated-desc', selectedRepo || null);
       setPrs(res.prs || []);
     } catch (err) {
       console.error(err);

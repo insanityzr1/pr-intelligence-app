@@ -7,7 +7,7 @@ export async function fetchPRs(repoName = null) {
   return res.json();
 }
 
-export async function syncPRs(count = 40, state = 'open', orderby = 'updated-desc', repoName = null) {
+export async function syncPRs(count = null, state = 'open', orderby = 'updated-desc', repoName = null) {
   const res = await fetch(`${API_BASE}/prs/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

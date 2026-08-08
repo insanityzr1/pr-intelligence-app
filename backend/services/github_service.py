@@ -3,6 +3,7 @@ import json
 import re
 import subprocess
 import sys
+from config import settings
 
 def format_relative_time(iso_str):
     if not iso_str:
@@ -51,42 +52,38 @@ def format_created_date(iso_str):
 def clean_text(text):
     if not text:
         return ""
-    text = text.replace('\r\n', ' ').replace('\n', ' ')
-    text = re.sub(r'\s+', ' ', text).strip()
-    return text
+    text = re.sub(r'[\r\n]+', ' ', text)
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
 
 def extract_summary(body, title):
-    if not body or len(body.strip()) < 10:
+    if not body:
         return title
     
-    lines = body.splitlines()
-    bullets = []
+    lines = [line.strip() for line in body.splitlines() if line.strip()]
+    
+    summary_lines = []
     in_summary = False
     
     for line in lines:
-        l = line.strip()
-        if re.search(r'#(?:#)?\s*(?:Summary|Motivation|Overview|Description|What changed)', l, re.IGNORECASE):
+        if line.lower().startswith('## summary') or line.lower().startswith('### summary') or line.lower() == 'summary':
             in_summary = True
             continue
-        if in_summary and l.startswith('#'):
-            in_summary = False
+        elif in_summary and line.startswith('##'):
+            break
+        elif in_summary:
+            if line.startswith('- ') or line.startswith('* '):
+                line = line[2:].strip()
+            summary_lines.append(line)
             
-        if l.startswith('- ') or l.startswith('* ') or l.startswith('1. '):
-            clean_b = re.sub(r'^[-*1-9.]+\s*', '', l)
-            clean_b = re.sub(r'\*\*([^*]+)\*\*', r'\1', clean_b)
-            if len(clean_b) > 10 and not clean_b.startswith("Ran ") and not clean_b.startswith("Verified"):
-                bullets.append(clean_b)
-                if len(" ".join(bullets)) > 160:
-                    break
-        elif in_summary and len(l) > 15 and not l.startswith('<') and not l.startswith('---'):
-            bullets.append(l)
-            if len(" ".join(bullets)) > 160:
-                break
-                
-    res = " ".join(bullets).strip()
-    if not res or len(res) < 15:
-        paragraphs = [p.strip() for p in body.split('\n\n') if p.strip() and not p.strip().startswith('#') and not p.strip().startswith('---')]
-        if paragraphs:
+    if summary_lines:
+        res = " ".join(summary_lines)
+    else:
+        filtered = [l for l in lines if not l.startswith('#') and not l.startswith('!') and not l.startswith('[')]
+        if filtered:
+            res = filtered[0]
+        else:
+            paragraphs = body.split('\n\n')
             res = paragraphs[0]
             
     res = clean_text(res)
@@ -98,7 +95,9 @@ def extract_summary(body, title):
 
 class GitHubService:
     @staticmethod
-    def fetch_prs(count: int = 40, state: str = "open", orderby: str = "updated-desc", repo_name: str = None, cwd: str = None):
+    def fetch_prs(count: int = None, state: str = "open", orderby: str = "updated-desc", repo_name: str = None, cwd: str = None):
+        fetch_limit = count if (count and count > 0) else settings.PR_FETCH_LIMIT
+        
         sort_mapping = {
             "updated-desc": "sort:updated-desc",
             "updated-asc": "sort:updated-asc",
@@ -113,7 +112,7 @@ class GitHubService:
 
         cmd = [
             "gh", "pr", "list",
-            "--limit", str(count),
+            "--limit", str(fetch_limit),
             "--search", search_query,
             "--json", "number,title,isDraft,updatedAt,createdAt,url,labels,additions,deletions,changedFiles,mergeable,body,author,headRefName,baseRefName,headRefOid"
         ]
@@ -149,7 +148,6 @@ class GitHubService:
             title_lower = title.lower()
             labels_lower = [l.lower() for l in labels]
             
-            # Type classification
             if is_draft and ("recipe" in title_lower or "proposal" in title_lower or "catalog" in title_lower):
                 pr_type = "Draft Feature"
             elif "new-feature" in labels_lower or title_lower.startswith("feat:") or "add " in title_lower or "implement" in title_lower:
@@ -163,88 +161,54 @@ class GitHubService:
             else:
                 pr_type = "Enhancement"
 
-            # Subtype classification
             if "fix" in title_lower or "bug" in labels_lower or "timezone" in title_lower or "n+1" in title_lower:
                 subtype = "Bug Fix"
             elif "palette" in title_lower or "accessibility" in title_lower or "a11y" in title_lower or "ui/ux" in labels_lower or "adminbar" in title_lower or "ux" in title_lower:
                 subtype = "UI / UX & Accessibility"
-            elif "cache" in title_lower or "query" in title_lower or "queries" in title_lower or "db" in title_lower or "performance" in labels_lower or "indexes" in title_lower:
-                subtype = "Performance & Database"
-            elif "ai provider" in title_lower or "capability" in title_lower or "ability" in title_lower or "prompt" in title_lower or "generator" in title_lower:
-                subtype = "AI Engine & Architecture"
-            elif "notification" in title_lower or "bridge" in title_lower or "integration" in title_lower or "crud" in title_lower or "quality gate" in title_lower or "affiliate" in title_lower or "enhancements" in title_lower:
-                subtype = "Plugin Features & API"
-            elif "telemetry" in title_lower or "diagnostics" in title_lower or "dev tools" in title_lower:
-                subtype = "Observability & Dev Tools"
-            elif "clean" in title_lower or "stale" in title_lower or "remove" in title_lower:
-                subtype = "Repo Maintenance"
+            elif "docs" in title_lower or "documentation" in labels_lower or "readme" in title_lower:
+                subtype = "Documentation"
             else:
-                subtype = "General Enhancement"
+                subtype = "Refactor / Enhancement"
 
-            # Current Status
             if mergeable == "CONFLICTING":
-                curr_status = "Has merge conflicts"
+                current_status = "needs fixing"
+                rec_action = "Needs Rebase & Conflict Fix"
             elif is_draft:
-                curr_status = "In Draft"
-            elif "ready-to-merge" in labels_lower:
-                curr_status = "Ready to merge"
-            elif "testing-needed" in labels_lower:
-                curr_status = "Needs testing"
-            elif "review-needed" in labels_lower:
-                curr_status = "Needs code review"
-            elif mergeable == "MERGEABLE":
-                curr_status = "Mergeable"
+                current_status = "needs testing"
+                rec_action = "In Development / Review"
             else:
-                curr_status = "Pending check"
+                current_status = "ready to merge"
+                rec_action = "Review & Merge"
 
-            # Risk calculation
             total_changes = additions + deletions
-            if mergeable == "CONFLICTING":
+            if total_changes > 1000 or changed_files > 15 or mergeable == "CONFLICTING":
                 risk = "High"
-                risk_detail = f"High (Merge conflicts present)"
+                risk_detail = "Large Refactor / Conflict"
                 risk_score = 3
-            elif total_changes > 5000 or changed_files > 30:
-                risk = "High"
-                risk_detail = f"High ({changed_files} files, +{additions}/-{deletions})"
-                risk_score = 3
-            elif total_changes > 1000 or changed_files > 15:
+            elif total_changes > 200 or changed_files > 5:
                 risk = "Medium"
-                risk_detail = f"Medium ({changed_files} files, +{additions}/-{deletions})"
+                risk_detail = "Moderate Changes"
                 risk_score = 2
             else:
                 risk = "Low"
-                risk_detail = f"Low ({changed_files} files, +{additions}/-{deletions})"
+                risk_detail = "Small Change"
                 risk_score = 1
 
-            # Action recommendation
-            if mergeable == "CONFLICTING":
-                rec_action = "Rebase & resolve conflicts"
-            elif is_draft:
-                rec_action = "Keep in Draft"
-            elif "ready-to-merge" in labels_lower and mergeable == "MERGEABLE":
-                rec_action = "Approve and merge"
-            elif "testing-needed" in labels_lower:
-                rec_action = "Execute integration/QA testing"
-            elif "review-needed" in labels_lower:
-                rec_action = "Conduct code review"
-            elif total_changes < 300 and mergeable == "MERGEABLE":
-                rec_action = "Quick review & merge"
-            else:
-                rec_action = "Review & run test suite"
+            target_repo = repo_name if repo_name else "rpnunez/wp-ai-scheduler"
 
             processed.append({
                 "number": num,
-                "id_str": f"#{num}",
+                "id_str": f"PR #{num}",
                 "url": url,
                 "title": title,
                 "status": status,
                 "summary": summary,
                 "type": pr_type,
                 "subtype": subtype,
-                "current_status": curr_status,
+                "current_status": current_status,
                 "risk": risk,
-                "risk_score": risk_score,
                 "risk_detail": risk_detail,
+                "risk_score": risk_score,
                 "rec_action": rec_action,
                 "changed_files": changed_files,
                 "additions": additions,
@@ -256,32 +220,19 @@ class GitHubService:
                 "created_at": created_at,
                 "created_fmt": created_fmt,
                 "head_sha": head_sha,
-                "repo_name": repo_name or "rpnunez/wp-ai-scheduler",
+                "repo_name": target_repo,
                 "labels": labels,
-                "body": body
+                "body": body,
+                "headRefName": pr.get("headRefName", ""),
+                "baseRefName": pr.get("baseRefName", "main")
             })
-            
+
         return processed
 
     @staticmethod
     def fetch_pr_diff(pr_number: int, repo_name: str = None, cwd: str = None) -> str:
-        try:
-            cmd = ["gh", "pr", "diff", str(pr_number)]
-            if repo_name:
-                cmd.extend(["--repo", repo_name])
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding="utf-8", cwd=cwd)
-            return result.stdout
-        except Exception:
-            return ""
-
-    @staticmethod
-    def fetch_pr_files(pr_number: int, repo_name: str = None, cwd: str = None) -> List[str]:
-        try:
-            cmd = ["gh", "pr", "view", str(pr_number), "--json", "files"]
-            if repo_name:
-                cmd.extend(["--repo", repo_name])
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding="utf-8", cwd=cwd)
-            data = json.loads(result.stdout)
-            return [f["path"] for f in data.get("files", [])]
-        except Exception:
-            return []
+        cmd = ["gh", "pr", "diff", str(pr_number)]
+        if repo_name:
+            cmd.extend(["--repo", repo_name])
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding="utf-8", cwd=cwd)
+        return result.stdout

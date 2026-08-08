@@ -1,6 +1,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import PlainTextResponse
+from config import settings
 from models import PRSummaryItem, SyncRequest, AnalyzeRequest, ChatMessageRequest
 from services.github_service import GitHubService
 from services.ai_service import AIService
@@ -12,11 +13,30 @@ router = APIRouter(prefix="/api/prs", tags=["PRs"])
 # In-memory store for synced PRs
 _prs_cache = {}
 
+def _populate_memory_cache_from_db():
+    global _prs_cache
+    if not _prs_cache:
+        db_prs = database.get_cached_prs()
+        if db_prs:
+            for pr in db_prs:
+                num = pr.get("number")
+                repo_name = pr.get("repo_name", settings.DEFAULT_REPO)
+                cache_key = f"{repo_name}#{num}"
+                cached_ai = database.get_cached_ai_review(num, pr.get("head_sha", ""))
+                if cached_ai:
+                    pr["ai_review"] = cached_ai
+                _prs_cache[cache_key] = pr
+
 @router.post("/sync")
 def sync_prs(req: SyncRequest):
     try:
-        repo_name = req.repo_name or "rpnunez/wp-ai-scheduler"
-        prs = GitHubService.fetch_prs(count=req.count, state=req.state, orderby=req.orderby, repo_name=repo_name)
+        repo_name = req.repo_name or settings.DEFAULT_REPO
+        fetch_count = req.count if (req.count and req.count > 0) else settings.PR_FETCH_LIMIT
+        
+        prs = GitHubService.fetch_prs(count=fetch_count, state=req.state, orderby=req.orderby, repo_name=repo_name)
+        
+        # Save PRs to SQLite DB for persistent caching across cold starts
+        database.save_prs(prs, repo_name)
         
         for pr in prs:
             num = pr["number"]
@@ -26,14 +46,21 @@ def sync_prs(req: SyncRequest):
                 pr["ai_review"] = cached_ai
             _prs_cache[cache_key] = pr
             
-        return {"status": "success", "count": len(prs), "prs": list(_prs_cache.values())}
+        all_prs = list(_prs_cache.values())
+        if repo_name:
+            filtered = [p for p in all_prs if p.get("repo_name") == repo_name]
+            return {"status": "success", "count": len(filtered), "prs": filtered}
+        return {"status": "success", "count": len(all_prs), "prs": all_prs}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("", response_model=List[PRSummaryItem])
 def get_prs(repo_name: Optional[str] = None):
+    _populate_memory_cache_from_db()
+    
+    # If DB and memory are both empty, trigger initial sync up to PR_FETCH_LIMIT
     if not _prs_cache:
-        sync_prs(SyncRequest(count=40, repo_name=repo_name))
+        sync_prs(SyncRequest(count=settings.PR_FETCH_LIMIT, repo_name=repo_name))
         
     all_prs = list(_prs_cache.values())
     if repo_name:
@@ -41,8 +68,11 @@ def get_prs(repo_name: Optional[str] = None):
     return all_prs
 
 @router.get("/{pr_number}")
-def get_pr_detail(pr_number: int, repo_name: Optional[str] = "rpnunez/wp-ai-scheduler"):
-    cache_key = f"{repo_name}#{pr_number}"
+def get_pr_detail(pr_number: int, repo_name: Optional[str] = None):
+    target_repo = repo_name or settings.DEFAULT_REPO
+    cache_key = f"{target_repo}#{pr_number}"
+    
+    _populate_memory_cache_from_db()
     
     if cache_key not in _prs_cache:
         found = [p for p in _prs_cache.values() if p["number"] == pr_number]
@@ -68,7 +98,7 @@ def get_pr_detail(pr_number: int, repo_name: Optional[str] = "rpnunez/wp-ai-sche
 @router.post("/analyze")
 def analyze_prs(req: AnalyzeRequest):
     analyzed = []
-    repo_name = req.repo_name or "rpnunez/wp-ai-scheduler"
+    repo_name = req.repo_name or settings.DEFAULT_REPO
     
     for num in req.pr_numbers:
         cache_key = f"{repo_name}#{num}"
@@ -85,13 +115,14 @@ def analyze_prs(req: AnalyzeRequest):
 
 # Interactive AI Chat endpoints per PR
 @router.get("/{pr_number}/chat")
-def get_chat_history(pr_number: int, repo_name: Optional[str] = "rpnunez/wp-ai-scheduler"):
-    history = database.get_pr_chat_history(pr_number, repo_name)
+def get_chat_history(pr_number: int, repo_name: Optional[str] = None):
+    target_repo = repo_name or settings.DEFAULT_REPO
+    history = database.get_pr_chat_history(pr_number, target_repo)
     return {"pr_number": pr_number, "history": history}
 
 @router.post("/{pr_number}/chat")
 def post_chat_message(pr_number: int, req: ChatMessageRequest):
-    repo_name = req.repo_name or "rpnunez/wp-ai-scheduler"
+    repo_name = req.repo_name or settings.DEFAULT_REPO
     user_msg = req.message.strip()
     
     if not user_msg:
@@ -135,19 +166,21 @@ Answer concisely, accurately, and professionally. If code snippets or unit tests
 
 # AI Merge Conflict Resolution endpoints
 @router.get("/{pr_number}/resolve-conflicts")
-def resolve_conflicts(pr_number: int, repo_name: Optional[str] = "rpnunez/wp-ai-scheduler"):
-    cache_key = f"{repo_name}#{pr_number}"
-    pr = _prs_cache.get(cache_key, {"number": pr_number, "title": "Conflicting PR", "repo_name": repo_name})
-    diff = GitHubService.fetch_pr_diff(pr_number, repo_name=repo_name)
+def resolve_conflicts(pr_number: int, repo_name: Optional[str] = None):
+    target_repo = repo_name or settings.DEFAULT_REPO
+    cache_key = f"{target_repo}#{pr_number}"
+    pr = _prs_cache.get(cache_key, {"number": pr_number, "title": "Conflicting PR", "repo_name": target_repo})
+    diff = GitHubService.fetch_pr_diff(pr_number, repo_name=target_repo)
     
     conflict_info = ConflictResolutionService.resolve_conflicts(pr, diff)
     return {"pr_number": pr_number, "conflict_info": conflict_info}
 
 @router.get("/{pr_number}/conflict-bash-script")
-def get_conflict_bash_script(pr_number: int, repo_name: Optional[str] = "rpnunez/wp-ai-scheduler"):
-    cache_key = f"{repo_name}#{pr_number}"
-    pr = _prs_cache.get(cache_key, {"number": pr_number, "title": "Conflicting PR", "repo_name": repo_name})
-    diff = GitHubService.fetch_pr_diff(pr_number, repo_name=repo_name)
+def get_conflict_bash_script(pr_number: int, repo_name: Optional[str] = None):
+    target_repo = repo_name or settings.DEFAULT_REPO
+    cache_key = f"{target_repo}#{pr_number}"
+    pr = _prs_cache.get(cache_key, {"number": pr_number, "title": "Conflicting PR", "repo_name": target_repo})
+    diff = GitHubService.fetch_pr_diff(pr_number, repo_name=target_repo)
     
     conflict_info = ConflictResolutionService.resolve_conflicts(pr, diff)
     bash_text = ConflictResolutionService.generate_bash_script(pr_number, conflict_info)
@@ -159,10 +192,11 @@ def get_conflict_bash_script(pr_number: int, repo_name: Optional[str] = "rpnunez
     )
 
 @router.get("/{pr_number}/conflict-patch")
-def get_conflict_patch(pr_number: int, repo_name: Optional[str] = "rpnunez/wp-ai-scheduler"):
-    cache_key = f"{repo_name}#{pr_number}"
-    pr = _prs_cache.get(cache_key, {"number": pr_number, "title": "Conflicting PR", "repo_name": repo_name})
-    diff = GitHubService.fetch_pr_diff(pr_number, repo_name=repo_name)
+def get_conflict_patch(pr_number: int, repo_name: Optional[str] = None):
+    target_repo = repo_name or settings.DEFAULT_REPO
+    cache_key = f"{target_repo}#{pr_number}"
+    pr = _prs_cache.get(cache_key, {"number": pr_number, "title": "Conflicting PR", "repo_name": target_repo})
+    diff = GitHubService.fetch_pr_diff(pr_number, repo_name=target_repo)
     
     conflict_info = ConflictResolutionService.resolve_conflicts(pr, diff)
     patch_text = ConflictResolutionService.generate_patch(pr_number, conflict_info)
