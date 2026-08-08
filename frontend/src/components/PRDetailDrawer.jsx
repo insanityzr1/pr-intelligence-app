@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { fetchPRDetail, analyzePRs, fetchPRChatHistory, postPRChatMessage } from '../api/client';
+import FormattedMarkdown from './FormattedMarkdown';
 
 export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveConflict }) {
   const [activeTab, setActiveTab] = useState('overview');
@@ -86,8 +87,12 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
         </div>
 
         <div className="drawer-subtabs">
-          <button className={`subtab-btn ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => setActiveTab('overview')}>Overview & AI Review</button>
-          <button className={`subtab-btn ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')}>💬 Chat with AI ({chatHistory.length})</button>
+          <button className={`subtab-btn ${activeTab === 'overview' ? 'active' : ''}`} onClick={() => setActiveTab('overview')}>
+            Overview & AI Review
+          </button>
+          <button className={`subtab-btn ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => setActiveTab('chat')}>
+            💬 Chat with AI ({chatHistory.length})
+          </button>
         </div>
 
         {loading ? (
@@ -114,11 +119,15 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
                   <strong>{pr.ai_review.code_quality_score} / 100</strong>
                 </div>
 
-                <h3>AI Executive Summary</h3>
-                <p>{pr.ai_review.ai_summary}</p>
+                <div className="section-block">
+                  <h3 className="section-title">AI Executive Summary</h3>
+                  <p className="section-text">{pr.ai_review.ai_summary}</p>
+                </div>
 
-                <h3>Architectural Impact</h3>
-                <p>{pr.ai_review.architectural_impact}</p>
+                <div className="section-block">
+                  <h3 className="section-title">Architectural Impact</h3>
+                  <p className="section-text">{pr.ai_review.architectural_impact}</p>
+                </div>
 
                 {pr.ai_review.breaking_changes?.length > 0 && (
                   <div className="alert alert-warning">
@@ -138,10 +147,12 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
                   </div>
                 )}
 
-                <h3>🧪 Generated QA Test Scenarios</h3>
-                <ol className="qa-list">
-                  {pr.ai_review.qa_test_scenarios?.map((t, i) => <li key={i}>{t}</li>)}
-                </ol>
+                <div className="section-block">
+                  <h3 className="section-title">🧪 Generated QA Test Scenarios</h3>
+                  <ol className="qa-list">
+                    {pr.ai_review.qa_test_scenarios?.map((t, i) => <li key={i}>{t}</li>)}
+                  </ol>
+                </div>
               </div>
             ) : (
               <div className="ai-review-box empty">
@@ -150,10 +161,12 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
               </div>
             )}
 
-            {/* Description Excerpt */}
+            {/* Formatted PR Description Excerpt */}
             <div className="pr-description-box">
-              <h3>PR Description Excerpt</h3>
-              <div className="description-content">{pr.body || 'No description provided.'}</div>
+              <h3 className="section-title">PR Description Excerpt</h3>
+              <div className="description-container">
+                <FormattedMarkdown content={pr.body} />
+              </div>
             </div>
           </div>
         ) : (
