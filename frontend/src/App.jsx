@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { fetchPRs, syncPRs, fetchRepos } from './api/client';
 import MetricsBar from './components/MetricsBar';
 import PRMatrix from './components/PRMatrix';
-import MultiPRWorkspace from './components/MultiPRWorkspace';
+import PRDetailDrawer from './components/PRDetailDrawer';
 import ConflictMap from './components/ConflictMap';
 import ReleaseBuilder from './components/ReleaseBuilder';
 import RepoManagerModal from './components/RepoManagerModal';
@@ -15,10 +15,7 @@ export default function App() {
   const [repos, setRepos] = useState([]);
   const [selectedRepo, setSelectedRepo] = useState('');
   
-  // Multi-PR Workspace State
-  const [openPrs, setOpenPrs] = useState([]); // [{ prNumber, repoName }]
-  const [activePrNumber, setActivePrNumber] = useState(null);
-
+  const [selectedPrNumber, setSelectedPrNumber] = useState(null);
   const [conflictResolverPr, setConflictResolverPr] = useState(null);
   const [showRepoManager, setShowRepoManager] = useState(false);
   
@@ -63,30 +60,6 @@ export default function App() {
     }
   }
 
-  function handleOpenPr(prNumber) {
-    const prItem = prs.find(p => p.number === prNumber);
-    const targetRepo = prItem?.repo_name || selectedRepo || 'rpnunez/wp-ai-scheduler';
-    
-    setOpenPrs(prev => {
-      if (prev.some(p => p.prNumber === prNumber)) return prev;
-      if (prev.length >= 5) {
-        return [...prev.slice(1), { prNumber, repoName: targetRepo }];
-      }
-      return [...prev, { prNumber, repoName: targetRepo }];
-    });
-    setActivePrNumber(prNumber);
-  }
-
-  function handleClosePr(prNumber) {
-    setOpenPrs(prev => {
-      const next = prev.filter(p => p.prNumber !== prNumber);
-      if (activePrNumber === prNumber) {
-        setActivePrNumber(next.length > 0 ? next[next.length - 1].prNumber : null);
-      }
-      return next;
-    });
-  }
-
   return (
     <div className="app-container">
       <header className="app-header">
@@ -124,7 +97,7 @@ export default function App() {
           <MetricsBar prs={prs} />
 
           {activeTab === 'matrix' && (
-            <PRMatrix prs={prs} onSelectPr={num => handleOpenPr(num)} />
+            <PRMatrix prs={prs} onSelectPr={num => setSelectedPrNumber(num)} />
           )}
 
           {activeTab === 'conflicts' && (
@@ -135,13 +108,11 @@ export default function App() {
             <ReleaseBuilder prs={prs} />
           )}
 
-          {openPrs.length > 0 && (
-            <MultiPRWorkspace
-              openPrs={openPrs}
-              activePrNumber={activePrNumber}
-              onSelectActivePr={num => setActivePrNumber(num)}
-              onClosePr={num => handleClosePr(num)}
-              onCloseAll={() => setOpenPrs([])}
+          {selectedPrNumber && (
+            <PRDetailDrawer
+              prNumber={selectedPrNumber}
+              repoName={selectedRepo}
+              onClose={() => setSelectedPrNumber(null)}
               onResolveConflict={(num, repo) => setConflictResolverPr({ prNumber: num, repoName: repo })}
             />
           )}

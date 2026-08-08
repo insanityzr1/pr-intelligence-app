@@ -35,7 +35,6 @@ def sync_prs(req: SyncRequest):
         
         prs = GitHubService.fetch_prs(count=fetch_count, state=req.state, orderby=req.orderby, repo_name=repo_name)
         
-        # Save PRs to SQLite DB for persistent caching across cold starts
         database.save_prs(prs, repo_name)
         
         for pr in prs:
@@ -133,23 +132,7 @@ def post_chat_message(pr_number: int, req: ChatMessageRequest):
     pr = _prs_cache.get(cache_key, {"number": pr_number, "title": "PR"})
     diff = GitHubService.fetch_pr_diff(pr_number, repo_name=repo_name)
     
-    prompt = f"""
-You are an expert AI pair programming assistant and code reviewer analyzing PR #{pr_number} ({pr.get('title')}) in `{repo_name}`.
-
-PR Metadata:
-- Author: {pr.get('author')}
-- Type: {pr.get('type')} / Subtype: {pr.get('subtype')}
-- Summary: {pr.get('summary')}
-
-Diff Excerpt:
-{diff[:3000]}
-
-User Question:
-{user_msg}
-
-Answer concisely, accurately, and professionally with respect to the user's specific question. Format code snippets or unit tests cleanly in markdown.
-"""
-    ai_text = AIService.chat_response(prompt)
+    ai_text = AIService.chat_response(pr, diff, user_msg)
     database.add_pr_chat_message(pr_number, repo_name, "assistant", ai_text)
     
     history = database.get_pr_chat_history(pr_number, repo_name)
