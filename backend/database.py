@@ -85,6 +85,18 @@ def init_db():
         FOREIGN KEY (group_id) REFERENCES pr_groups(group_id) ON DELETE CASCADE
     )
     """)
+
+    # 7. Saved Changelogs & Release Notes
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS changelogs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        pr_numbers TEXT NOT NULL,
+        branches TEXT NOT NULL,
+        markdown TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
     
     # Default repository insertion if empty
     cursor.execute("SELECT COUNT(*) as cnt FROM repositories")
@@ -222,7 +234,6 @@ def get_pr_tags(pr_number: int, repo_name: str):
     return [r["tag"] for r in rows]
 
 def get_all_pr_tags_map():
-    """Returns dict mapping 'repo_name#pr_number' to list of tags"""
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("SELECT pr_number, repo_name, tag FROM pr_tags")
@@ -323,3 +334,56 @@ def remove_pr_from_group(group_id: int, pr_number: int, repo_name: str):
     conn.commit()
     conn.close()
     return get_group_items(group_id)
+
+# Saved Changelogs Helpers
+def save_changelog(title: str, pr_numbers: list, branches: list, markdown: str):
+    conn = get_db()
+    cursor = conn.cursor()
+    pr_json = json.dumps(pr_numbers)
+    branch_json = json.dumps(branches)
+    cursor.execute("""
+    INSERT INTO changelogs (title, pr_numbers, branches, markdown)
+    VALUES (?, ?, ?, ?)
+    """, (title, pr_json, branch_json, markdown))
+    changelog_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return {
+        "id": changelog_id,
+        "title": title,
+        "pr_numbers": pr_numbers,
+        "branches": branches,
+        "markdown": markdown
+    }
+
+def get_changelogs():
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+    SELECT id, title, pr_numbers, branches, markdown, created_at
+    FROM changelogs
+    ORDER BY id DESC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    results = []
+    for r in rows:
+        item = dict(r)
+        try:
+            item["pr_numbers"] = json.loads(r["pr_numbers"])
+        except Exception:
+            item["pr_numbers"] = []
+        try:
+            item["branches"] = json.loads(r["branches"])
+        except Exception:
+            item["branches"] = []
+        results.append(item)
+    return results
+
+def delete_changelog(changelog_id: int):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM changelogs WHERE id = ?", (changelog_id,))
+    conn.commit()
+    conn.close()
+    return True

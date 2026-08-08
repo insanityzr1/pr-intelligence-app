@@ -1,25 +1,38 @@
-import React, { useState } from 'react';
-import { generateChangelog } from '../api/client';
+import React, { useState, useEffect } from 'react';
+import { generateChangelog, fetchPastChangelogs, deletePastChangelog } from '../api/client';
 import FormattedMarkdown from './FormattedMarkdown';
 
 export default function ReleaseBuilder({ prs }) {
   const [selectedPrs, setSelectedPrs] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [changelog, setChangelog] = useState(null);
+  const [pastChangelogs, setPastChangelogs] = useState([]);
+  const [activePastId, setActivePastId] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    loadPastChangelogs();
+  }, []);
+
+  async function loadPastChangelogs() {
+    try {
+      const res = await fetchPastChangelogs();
+      setPastChangelogs(res.changelogs || []);
+    } catch (err) {
+      console.error(err);
+    }
+  }
 
   // Typeahead search filtering
   const filteredPrs = prs.filter(pr => {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.trim().toLowerCase();
     
-    // Filter by PR number if query starts with '#' or is a number
     if (q.startsWith('#')) {
       const numStr = q.replace('#', '');
       return pr.number.toString().includes(numStr);
     }
     
-    // Filter by Title, Head Branch, Base Branch, Author, or PR Number
     return (
       pr.title.toLowerCase().includes(q) ||
       (pr.headRefName && pr.headRefName.toLowerCase().includes(q)) ||
@@ -54,10 +67,31 @@ export default function ReleaseBuilder({ prs }) {
     try {
       const data = await generateChangelog(selectedPrs);
       setChangelog(data);
+      setActivePastId(data.id || null);
+      await loadPastChangelogs();
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  function handleSelectPast(item) {
+    setActivePastId(item.id);
+    setChangelog(item);
+  }
+
+  async function handleDeletePast(e, id) {
+    e.stopPropagation();
+    try {
+      await deletePastChangelog(id);
+      await loadPastChangelogs();
+      if (activePastId === id) {
+        setActivePastId(null);
+        setChangelog(null);
+      }
+    } catch (err) {
+      console.error(err);
     }
   }
 
@@ -80,14 +114,15 @@ export default function ReleaseBuilder({ prs }) {
         </div>
       </div>
 
-      <div className="builder-layout">
+      <div className="builder-layout-three-col">
+        {/* Col 1: PR Selection List with Typeahead */}
         <div className="pr-selector-list">
           <div className="typeahead-container">
             <label className="typeahead-label">Search & Filter PRs for Release</label>
             <div className="typeahead-input-wrapper">
               <input
                 type="text"
-                placeholder="Type PR title, branch name, author, or '#1874' to filter..."
+                placeholder="Type PR title, branch name, author, or '#1874'..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className="typeahead-input"
@@ -123,17 +158,56 @@ export default function ReleaseBuilder({ prs }) {
           </div>
         </div>
 
+        {/* Col 2: Condensed Past Generated Changelogs Sidebar */}
+        <div className="past-changelogs-sidebar">
+          <h3>📜 Saved Release Notes ({pastChangelogs.length})</h3>
+          <p className="sidebar-subtitle">Click any generated release to view draft markdown.</p>
+          
+          {pastChangelogs.length === 0 ? (
+            <div className="empty-box">No saved release notes yet.</div>
+          ) : (
+            <div className="past-changelogs-scroll">
+              {pastChangelogs.map(item => (
+                <div
+                  key={item.id}
+                  className={`past-changelog-card ${activePastId === item.id ? 'active' : ''}`}
+                  onClick={() => handleSelectPast(item)}
+                >
+                  <div className="past-head">
+                    <strong className="past-title">{item.title}</strong>
+                    <button
+                      onClick={e => handleDeletePast(e, item.id)}
+                      className="btn-icon-danger"
+                      title="Delete draft"
+                    >
+                      &times;
+                    </button>
+                  </div>
+
+                  <div className="past-meta">
+                    <span className="past-date">🕒 {item.created_at}</span>
+                    {item.branches?.length > 0 && (
+                      <span className="past-branches">🌿 {item.branches.join(', ')}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Col 3: Generated Release Output Viewer */}
         <div className="changelog-output">
           <h3>Generated Release Draft Output</h3>
           {loading ? (
             <div className="loading">AI grouping PRs into release categories and writing release notes...</div>
           ) : changelog ? (
             <div className="markdown-box">
-              <FormattedMarkdown content={changelog.markdown || changelog.changelog || str(changelog)} />
+              <FormattedMarkdown content={changelog.markdown || changelog.changelog || ''} />
             </div>
           ) : (
             <div className="empty-box">
-              Select PRs on the left and click "Generate Changelog" to construct AI release notes.
+              Select PRs on the left and click "Generate Changelog" or pick a saved release draft from the list.
             </div>
           )}
         </div>
