@@ -1,22 +1,35 @@
+import logging
 from typing import List, Dict
-from services.github_service import GitHubService
+from services.github_service import GitHubService, GitHubServiceError
+
+logger = logging.getLogger(__name__)
 
 class ConflictService:
     @staticmethod
-    def detect_file_collisions(prs: List[Dict]) -> List[Dict]:
+    def detect_file_collisions(prs: List[Dict]) -> Dict:
         file_to_prs = {}
-        
+        skipped = []
+
         for pr in prs:
             pr_num = pr['number']
-            files = GitHubService.fetch_pr_files(pr_num, pr.get('repo_name'))
+            try:
+                files = GitHubService.fetch_pr_files(pr_num, pr.get('repo_name'))
+            except GitHubServiceError as exc:
+                # One unreachable PR must not blank out the whole collision map,
+                # but it also must not silently look like "no collisions".
+                logger.warning("Skipping PR #%s in collision scan: %s", pr_num, exc)
+                skipped.append({"pr_number": pr_num, "repo_name": pr.get('repo_name'), "reason": str(exc)})
+                continue
+
             for f in files:
                 if f not in file_to_prs:
                     file_to_prs[f] = []
                 file_to_prs[f].append({
                     "pr_number": pr_num,
+                    "repo_name": pr.get('repo_name'),
                     "title": pr.get('title', f"PR #{pr_num}"),
                     "author": pr.get('author', 'unknown'),
-                    "url": pr.get('url', f"https://github.com/rpnunez/wp-ai-scheduler/pull/{pr_num}")
+                    "url": pr.get('url')
                 })
 
         collisions = []
@@ -29,4 +42,5 @@ class ConflictService:
                     "severity": "HIGH" if len(pr_list) > 2 else "MEDIUM"
                 })
 
-        return sorted(collisions, key=lambda x: x['overlapping_prs_count'], reverse=True)
+        collisions.sort(key=lambda x: x['overlapping_prs_count'], reverse=True)
+        return {"collisions": collisions, "skipped": skipped}

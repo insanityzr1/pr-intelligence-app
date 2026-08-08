@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { generateChangelog, fetchChangelogs, deleteChangelog, fetchGroups, fetchGroupItems, createGroup } from '../api/client';
 import FormattedMarkdown from './FormattedMarkdown';
+import { itemRefKey, prRefKey } from '../utils/prStats';
 
 export default function ReleaseBuilder({ prs }) {
   const [groups, setGroups] = useState([]);
@@ -80,7 +81,9 @@ export default function ReleaseBuilder({ prs }) {
   }
 
   const activeGroup = groups.find(g => g.group_id === activeGroupId);
-  const activePrObjects = prs ? prs.filter(p => activeItems.some(i => i.pr_number === (p.number ?? p.pr_number))) : [];
+  // Match on (repo, number) — see StagingWorkspacesTab for the same fix.
+  const activeItemKeys = new Set(activeItems.map(itemRefKey));
+  const activePrObjects = prs ? prs.filter(p => activeItemKeys.has(prRefKey(p))) : [];
 
   async function handleBuild() {
     if (activeItems.length === 0) return;

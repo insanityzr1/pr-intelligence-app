@@ -1,6 +1,7 @@
 import json
 import requests
 from config import settings
+from services.diff_parser import DiffParser
 
 class AIService:
     @staticmethod
@@ -10,7 +11,12 @@ class AIService:
         title = pr_data.get('title', '')
         author = pr_data.get('author', '')
         pr_type = pr_data.get('type', 'Enhancement')
-        
+
+        # Chunk rather than hard-slice. A raw diff_text[:4000] routinely cut mid-hunk
+        # and dropped every file after the first, so large PRs were reviewed on a
+        # fragment without the model being told anything was missing.
+        diff_context = DiffParser.prepare_diff_context(diff_text)
+
         prompt = f"""
 You are an expert Senior Code Reviewer and Lead Architect.
 Analyze PR #{pr_number} in repo `{repo_name}`.
@@ -20,7 +26,7 @@ Author: @{author}
 Type: {pr_type}
 
 Diff Excerpt:
-{diff_text[:4000]}
+{diff_context}
 
 Respond ONLY with a valid JSON object matching this structure:
 {{
@@ -57,6 +63,7 @@ Respond ONLY with a valid JSON object matching this structure:
         title = pr_data.get('title', 'PR')
         author = pr_data.get('author', 'unknown')
         summary = pr_data.get('summary', '')
+        diff_context = DiffParser.prepare_diff_context(diff_text, max_lines=350)
 
         prompt = f"""
 You are an expert AI Pair Programmer assisting a developer with Pull Request #{pr_number} in `{repo_name}`.
@@ -67,7 +74,7 @@ PR Details:
 - Summary: {summary}
 
 Code Diff Excerpt:
-{diff_text[:3500]}
+{diff_context}
 
 User Question:
 {user_msg}

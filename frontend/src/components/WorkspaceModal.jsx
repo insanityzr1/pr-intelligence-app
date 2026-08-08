@@ -1,28 +1,46 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import {
+  prNumberOf,
+  prRefKey,
+  itemRefKey,
+  isConflicting,
+  headBranchOf,
+  baseBranchOf,
+} from '../utils/prStats';
 
-export default function WorkspaceModal({ isOpen, onClose, onSave, group = null, existingPrNumbers = [], allPrs = [] }) {
+export default function WorkspaceModal({ isOpen, onClose, onSave, group = null, existingItems = [], allPrs = [] }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [selectedPrs, setSelectedPrs] = useState([]);
+  // Selection is keyed by `{repo}#{number}`, not by PR number — numbers collide
+  // across repositories.
+  const [selectedKeys, setSelectedKeys] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
+  // Derive a stable primitive from existingItems. The parent builds this array
+  // inline, so it has a fresh identity on every parent render; depending on the
+  // array itself would reset the user's in-progress selection mid-edit.
+  const existingKeysSignature = useMemo(
+    () => (existingItems || []).map(itemRefKey).sort().join('|'),
+    [existingItems]
+  );
+
   useEffect(() => {
-    if (isOpen) {
-      if (group) {
-        setName(group.name || '');
-        setDescription(group.description || '');
-        setSelectedPrs(existingPrNumbers || []);
-      } else {
-        setName('');
-        setDescription('');
-        setSelectedPrs([]);
-      }
-      setSearchQuery('');
-      setError(null);
+    if (!isOpen) return;
+    if (group) {
+      setName(group.name || '');
+      setDescription(group.description || '');
+      setSelectedKeys(existingKeysSignature ? existingKeysSignature.split('|') : []);
+    } else {
+      setName('');
+      setDescription('');
+      setSelectedKeys([]);
     }
-  }, [isOpen, group, existingPrNumbers]);
+    setSearchQuery('');
+    setError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, group?.group_id, existingKeysSignature]);
 
   const filteredPrs = useMemo(() => {
     if (!searchQuery.trim()) return allPrs;
@@ -30,11 +48,11 @@ export default function WorkspaceModal({ isOpen, onClose, onSave, group = null, 
     
     if (q.startsWith('#')) {
       const numStr = q.replace('#', '');
-      return allPrs.filter(pr => (pr.number ?? pr.pr_number)?.toString().includes(numStr));
+      return allPrs.filter(pr => prNumberOf(pr)?.toString().includes(numStr));
     }
 
     return allPrs.filter(pr => {
-      const num = (pr.number ?? pr.pr_number)?.toString();
+      const num = prNumberOf(pr)?.toString();
       return (
         pr.title?.toLowerCase().includes(q) ||
         (pr.headRefName && pr.headRefName.toLowerCase().includes(q)) ||
@@ -49,22 +67,19 @@ export default function WorkspaceModal({ isOpen, onClose, onSave, group = null, 
 
   if (!isOpen) return null;
 
-  function togglePr(num) {
-    if (selectedPrs.includes(num)) {
-      setSelectedPrs(selectedPrs.filter(n => n !== num));
-    } else {
-      setSelectedPrs([...selectedPrs, num]);
-    }
+  function togglePr(key) {
+    setSelectedKeys(prev =>
+      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+    );
   }
 
   function selectAllFiltered() {
-    const filteredNums = filteredPrs.map(p => p.number ?? p.pr_number).filter(Boolean);
-    const combined = Array.from(new Set([...selectedPrs, ...filteredNums]));
-    setSelectedPrs(combined);
+    const filteredKeys = filteredPrs.map(prRefKey);
+    setSelectedKeys(prev => Array.from(new Set([...prev, ...filteredKeys])));
   }
 
   function clearSelection() {
-    setSelectedPrs([]);
+    setSelectedKeys([]);
   }
 
   async function handleSubmit(e) {
@@ -73,11 +88,20 @@ export default function WorkspaceModal({ isOpen, onClose, onSave, group = null, 
     setSaving(true);
     setError(null);
     try {
+      // Emit fully-qualified refs so the parent never has to guess a repository.
+      const selectedRefs = selectedKeys.map(key => {
+        const sep = key.lastIndexOf('#');
+        return {
+          repo_name: key.slice(0, sep),
+          pr_number: Number(key.slice(sep + 1)),
+        };
+      });
+
       await onSave({
         group_id: group?.group_id || null,
         name: name.trim(),
         description: description.trim(),
-        selectedPrNumbers: selectedPrs
+        selectedRefs
       });
       onClose();
     } catch (err) {
@@ -138,14 +162,14 @@ export default function WorkspaceModal({ isOpen, onClose, onSave, group = null, 
             {/* Combined Search PRs Section */}
             <div className="pr-picker-section">
               <div className="pr-picker-header">
-                <label>Search / Select PRs to add ({selectedPrs.length} selected)</label>
+                <label>Search / Select PRs to add ({selectedKeys.length} selected)</label>
                 <div className="pr-picker-actions">
                   {searchQuery && filteredPrs.length > 0 && (
                     <button type="button" onClick={selectAllFiltered} className="btn-link-sm">
                       Select All Filtered ({filteredPrs.length})
                     </button>
                   )}
-                  {selectedPrs.length > 0 && (
+                  {selectedKeys.length > 0 && (
                     <button type="button" onClick={clearSelection} className="btn-link-sm danger">
                       Clear Selection
                     </button>
@@ -171,21 +195,28 @@ export default function WorkspaceModal({ isOpen, onClose, onSave, group = null, 
                   <div className="empty-box">No PRs match your search query '{searchQuery}'.</div>
                 ) : (
                   filteredPrs.map(pr => {
-                    const prNum = pr.number ?? pr.pr_number;
+                    const prNum = prNumberOf(pr);
                     if (!prNum) return null;
-                    const isSelected = selectedPrs.includes(prNum);
+                    const key = prRefKey(pr);
+                    const isSelected = selectedKeys.includes(key);
+                    const conflicting = isConflicting(pr);
                     return (
-                      <label key={prNum} className={`pr-checkbox-item ${isSelected ? 'selected' : ''}`}>
+                      <label key={key} className={`pr-checkbox-item ${isSelected ? 'selected' : ''}`}>
                         <input
                           type="checkbox"
                           checked={isSelected}
-                          onChange={() => togglePr(prNum)}
+                          onChange={() => togglePr(key)}
                         />
                         <div className="info">
                           <div className="pr-checkbox-head">
                             <strong>#{prNum}: {pr.title}</strong>
+                            {conflicting && (
+                              <span className="conflict-badge" title="This PR currently conflicts with its base branch">
+                                ⚠️ Conflicting
+                              </span>
+                            )}
                             <span className="branch-badge">
-                              {pr.headRefName || pr.head_branch || 'feature'} ➜ {pr.baseRefName || pr.base_branch || 'main'}
+                              {headBranchOf(pr) || 'feature'} ➜ {baseBranchOf(pr) || 'main'}
                             </span>
                           </div>
                           <span className="pr-type-meta">

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { fetchTagsMap } from '../api/client';
 import PRCommandBar from './PRCommandBar';
+import { isConflicting, isMergeable, isHighRisk, isAiAnalyzed } from '../utils/prStats';
 
 export default function PRMatrix({ prs, onSelectPr }) {
   const [search, setSearch] = useState('');
@@ -97,10 +98,10 @@ export default function PRMatrix({ prs, onSelectPr }) {
 
     // KPI Multi-select Filters
     let mKpi = true;
-    if (activeKpis.mergeable && pr.mergeable !== 'MERGEABLE') mKpi = false;
-    if (activeKpis.conflicts && pr.mergeable !== 'CONFLICTING') mKpi = false;
-    if (activeKpis.highRisk && pr.risk !== 'High') mKpi = false;
-    if (activeKpis.aiAnalyzed && !pr.ai_review) mKpi = false;
+    if (activeKpis.mergeable && !isMergeable(pr)) mKpi = false;
+    if (activeKpis.conflicts && !isConflicting(pr)) mKpi = false;
+    if (activeKpis.highRisk && !isHighRisk(pr)) mKpi = false;
+    if (activeKpis.aiAnalyzed && !isAiAnalyzed(pr)) mKpi = false;
 
     return mSearch && mStatus && mType && mSubtype && mCurrStatus && mRisk && mAction && mTag && mKpi;
   });
@@ -194,13 +195,24 @@ export default function PRMatrix({ prs, onSelectPr }) {
                 const key = `${pr.repo_name}#${pr.number}`;
                 const prTags = tagsMap[key] || [];
 
+                const conflicting = isConflicting(pr);
+
                 return (
-                  <tr key={key} onClick={() => onSelectPr(pr.number)} className="pr-row">
+                  <tr
+                    key={key}
+                    onClick={() => onSelectPr(pr.number, pr.repo_name)}
+                    className={`pr-row ${conflicting ? 'row-conflicting' : ''}`}
+                  >
                     <td className="pr-id-cell">
                       <span className="pr-num">PR #{pr.number}</span>
+                      {conflicting && (
+                        <span className="conflict-badge" title="Conflicts with base branch">
+                          ⚠️ Conflict
+                        </span>
+                      )}
                       {pr.repo_name && <span className="repo-badge">{pr.repo_name}</span>}
                     </td>
-                    <td className="updated-cell">{pr.updated_at_human}</td>
+                    <td className="updated-cell">{pr.updated_rel}</td>
                     <td className="title-summary-cell">
                       <div className="pr-title-row">
                         <span className="pr-title">{pr.title}</span>
@@ -213,7 +225,7 @@ export default function PRMatrix({ prs, onSelectPr }) {
                         </div>
                       )}
                       <div className="pr-summary">{pr.summary}</div>
-                      <div className="pr-author-meta">Created: {pr.created_at_human}</div>
+                      <div className="pr-author-meta">Created: {pr.created_fmt}</div>
                     </td>
                     <td>
                       <span className={`status-badge ${pr.status.toLowerCase()}`}>{pr.status}</span>
@@ -227,7 +239,7 @@ export default function PRMatrix({ prs, onSelectPr }) {
                     </td>
                     <td>
                       <span className={`risk-badge ${pr.risk.toLowerCase()}`}>
-                        {pr.risk_desc || pr.risk}
+                        {pr.risk_detail || pr.risk}
                       </span>
                     </td>
                     <td className="action-cell">

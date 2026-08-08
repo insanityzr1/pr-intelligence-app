@@ -1,9 +1,16 @@
 from datetime import datetime, timezone
 import json
+import logging
 import re
 import subprocess
 import sys
 from config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class GitHubServiceError(RuntimeError):
+    """Raised when a `gh` invocation fails. Callers should surface this, not mask it."""
 
 def format_relative_time(iso_str):
     if not iso_str:
@@ -78,8 +85,26 @@ class GitHubService:
         if repo_name:
             cmd.extend(["--repo", repo_name])
 
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding="utf-8", cwd=cwd)
-        raw_prs = json.loads(result.stdout)
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, check=True, encoding="utf-8", cwd=cwd
+            )
+            raw_prs = json.loads(result.stdout)
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or "").strip()
+            logger.error("gh pr list failed for %s: %s", repo_name or "<default repo>", stderr)
+            raise GitHubServiceError(
+                f"Could not list PRs for {repo_name or 'the default repository'}"
+                + (f": {stderr}" if stderr else "")
+            ) from exc
+        except FileNotFoundError as exc:
+            logger.error("The `gh` CLI was not found on PATH.")
+            raise GitHubServiceError(
+                "The GitHub CLI (`gh`) is not installed or not on PATH."
+            ) from exc
+        except json.JSONDecodeError as exc:
+            logger.error("Unparseable JSON from gh pr list: %s", exc)
+            raise GitHubServiceError("Malformed response from GitHub while listing PRs.") from exc
 
         processed = []
         for pr in raw_prs:
@@ -194,22 +219,74 @@ class GitHubService:
 
     @staticmethod
     def fetch_pr_diff(pr_number: int, repo_name: str = None, cwd: str = None) -> str:
+        """
+        Return the raw unified diff for a PR.
+
+        Raises on failure. This used to swallow every exception and return a
+        fabricated diff ("-old code / +new code"), which was then fed to the LLM
+        and to the conflict resolver — producing confident, entirely fictional
+        reviews with no error surfaced anywhere.
+        """
+        cmd = ["gh", "pr", "diff", str(pr_number)]
+        if repo_name:
+            cmd.extend(["--repo", repo_name])
         try:
-            cmd = ["gh", "pr", "diff", str(pr_number)]
-            if repo_name:
-                cmd.extend(["--repo", repo_name])
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding="utf-8", cwd=cwd)
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, check=True, encoding="utf-8", cwd=cwd
+            )
             return result.stdout
-        except Exception:
-            return f"--- a/file_{pr_number}.py\n+++ b/file_{pr_number}.py\n@@ -1,3 +1,3 @@\n-old code\n+new code"
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or "").strip()
+            logger.error("gh pr diff failed for PR #%s (%s): %s", pr_number, repo_name, stderr)
+            raise GitHubServiceError(
+                f"Could not fetch diff for PR #{pr_number}"
+                + (f" in {repo_name}" if repo_name else "")
+                + (f": {stderr}" if stderr else "")
+            ) from exc
+        except FileNotFoundError as exc:
+            logger.error("The `gh` CLI was not found on PATH.")
+            raise GitHubServiceError(
+                "The GitHub CLI (`gh`) is not installed or not on PATH."
+            ) from exc
 
     @staticmethod
-    def fetch_pr_files(pr_number: int, repo_name: str = None) -> list:
-        diff = GitHubService.fetch_pr_diff(pr_number, repo_name)
+    def fetch_pr_files(pr_number: int, repo_name: str = None, cwd: str = None) -> list:
+        """
+        Return the file paths touched by a PR.
+
+        Asks GitHub for the file list directly instead of downloading and
+        re-parsing the entire diff — the old approach cost one full `gh pr diff`
+        per PR, which dominated the runtime of the collision matrix.
+        """
+        cmd = ["gh", "pr", "view", str(pr_number), "--json", "files"]
+        if repo_name:
+            cmd.extend(["--repo", repo_name])
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, check=True, encoding="utf-8", cwd=cwd
+            )
+            payload = json.loads(result.stdout or "{}")
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or "").strip()
+            logger.error("gh pr view --json files failed for PR #%s (%s): %s", pr_number, repo_name, stderr)
+            raise GitHubServiceError(
+                f"Could not fetch file list for PR #{pr_number}"
+                + (f": {stderr}" if stderr else "")
+            ) from exc
+        except FileNotFoundError as exc:
+            logger.error("The `gh` CLI was not found on PATH.")
+            raise GitHubServiceError(
+                "The GitHub CLI (`gh`) is not installed or not on PATH."
+            ) from exc
+        except json.JSONDecodeError as exc:
+            logger.error("Unparseable JSON from gh for PR #%s: %s", pr_number, exc)
+            raise GitHubServiceError(
+                f"Malformed response from GitHub for PR #{pr_number}."
+            ) from exc
+
         files = []
-        for line in diff.splitlines():
-            if line.startswith("--- a/") or line.startswith("+++ b/"):
-                fname = line[6:].strip()
-                if fname and fname not in files:
-                    files.append(fname)
-        return files or [f"file_{pr_number}.py"]
+        for entry in payload.get("files") or []:
+            path = entry.get("path") if isinstance(entry, dict) else None
+            if path and path not in files:
+                files.append(path)
+        return files

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { fetchPRDetail, analyzePRs, fetchPRChatHistory, postPRChatMessage, fetchTagsMap } from '../api/client';
 import FormattedMarkdown from './FormattedMarkdown';
 import PRTagBar from './PRTagBar';
+import { refKey } from '../utils/prStats';
 
 export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveConflict }) {
   const [activeTab, setActiveTab] = useState('overview');
@@ -20,7 +21,6 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
     if (prNumber) {
       loadDetail();
       loadChat();
-      loadPRTags();
     }
     return () => {
       document.body.style.overflow = 'unset';
@@ -32,6 +32,8 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
     try {
       const data = await fetchPRDetail(prNumber, repoName);
       setPr(data);
+      // Tags are keyed by repo, so load them only once the PR's own repo is known.
+      await loadPRTags(repoName || data?.repo_name);
     } catch (err) {
       console.error(err);
     } finally {
@@ -39,12 +41,15 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
     }
   }
 
-  async function loadPRTags() {
+  async function loadPRTags(targetRepo) {
+    // Never guess a repository name — without one the tag key is meaningless.
+    if (!targetRepo) {
+      setActiveTags([]);
+      return;
+    }
     try {
       const res = await fetchTagsMap();
-      const targetRepo = repoName || 'rpnunez/wp-ai-scheduler';
-      const key = `${targetRepo}#${prNumber}`;
-      setActiveTags(res.tags_map?.[key] || []);
+      setActiveTags(res.tags_map?.[refKey(prNumber, targetRepo)] || []);
     } catch (err) {
       console.error(err);
     }

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { fetchGroups, createGroup, updateGroup, deleteGroup, fetchGroupItems, addPrsToGroup, removePrFromGroup, analyzePRs, generateChangelog } from '../api/client';
 import FormattedMarkdown from './FormattedMarkdown';
 import WorkspaceModal from './WorkspaceModal';
+import { itemRefKey, prRefKey, isConflicting } from '../utils/prStats';
 
 export default function StagingWorkspacesTab({ prs, onSelectPr }) {
   const [groups, setGroups] = useState([]);
@@ -95,51 +96,48 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
     }
   }
 
-  async function handleSaveWorkspace({ group_id, name, description, selectedPrNumbers }) {
+  // Group fully-qualified {repo_name, pr_number} refs into one add-call per repo.
+  function groupRefsByRepo(refs) {
+    const byRepo = {};
+    for (const ref of refs) {
+      if (!ref?.repo_name) continue;
+      if (!byRepo[ref.repo_name]) byRepo[ref.repo_name] = [];
+      byRepo[ref.repo_name].push(ref.pr_number);
+    }
+    return byRepo;
+  }
+
+  async function handleSaveWorkspace({ group_id, name, description, selectedRefs = [] }) {
     try {
       let targetGId = group_id;
       if (group_id) {
         // Edit existing group
         await updateGroup(group_id, name, description);
-        
-        // Compute delta of PRs
-        const existingItems = await fetchGroupItems(group_id);
-        const currentNums = (existingItems.items || []).map(i => i.pr_number);
-        
-        const addedNums = selectedPrNumbers.filter(n => !currentNums.includes(n));
-        const removedNums = currentNums.filter(n => !selectedPrNumbers.includes(n));
 
-        if (addedNums.length > 0) {
-          const prsByRepo = {};
-          for (const num of addedNums) {
-            const prObj = prs.find(p => (p.number ?? p.pr_number) === num);
-            const repo = prObj?.repo_name || 'rpnunez/wp-ai-scheduler';
-            if (!prsByRepo[repo]) prsByRepo[repo] = [];
-            prsByRepo[repo].push(num);
-          }
-          for (const [repo, nums] of Object.entries(prsByRepo)) {
-            await addPrsToGroup(group_id, nums, repo);
-          }
+        // Compute delta of PRs, keyed by (repo, number) so PR #42 in two different
+        // repositories is treated as two distinct items.
+        const existing = await fetchGroupItems(group_id);
+        const currentItems = existing.items || [];
+        const currentKeys = new Set(currentItems.map(itemRefKey));
+        const selectedKeys = new Set(selectedRefs.map(itemRefKey));
+
+        const addedRefs = selectedRefs.filter(r => !currentKeys.has(itemRefKey(r)));
+        const removedItems = currentItems.filter(i => !selectedKeys.has(itemRefKey(i)));
+
+        for (const [repo, nums] of Object.entries(groupRefsByRepo(addedRefs))) {
+          await addPrsToGroup(group_id, nums, repo);
         }
 
-        for (const rNum of removedNums) {
-          const prObj = prs.find(p => (p.number ?? p.pr_number) === rNum);
-          await removePrFromGroup(group_id, rNum, prObj?.repo_name || 'rpnunez/wp-ai-scheduler');
+        for (const item of removedItems) {
+          await removePrFromGroup(group_id, item.pr_number, item.repo_name);
         }
       } else {
         // Create new group
         const res = await createGroup(name, description);
         targetGId = res.group?.group_id;
-        
-        if (targetGId && selectedPrNumbers.length > 0) {
-          const prsByRepo = {};
-          for (const num of selectedPrNumbers) {
-            const prObj = prs.find(p => (p.number ?? p.pr_number) === num);
-            const repo = prObj?.repo_name || 'rpnunez/wp-ai-scheduler';
-            if (!prsByRepo[repo]) prsByRepo[repo] = [];
-            prsByRepo[repo].push(num);
-          }
-          for (const [repo, nums] of Object.entries(prsByRepo)) {
+
+        if (targetGId && selectedRefs.length > 0) {
+          for (const [repo, nums] of Object.entries(groupRefsByRepo(selectedRefs))) {
             await addPrsToGroup(targetGId, nums, repo);
           }
         }
@@ -159,10 +157,17 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
   async function handleBatchAnalyze() {
     if (activeItems.length === 0) return;
     setBatchAnalyzing(true);
-    const prNums = activeItems.map(i => i.pr_number);
     try {
-      await analyzePRs(prNums, true);
-      alert(`Batch AI Analysis complete for ${prNums.length} PRs in this workspace!`);
+      // Analyze per repository so each batch carries the repo it belongs to.
+      const byRepo = {};
+      for (const item of activeItems) {
+        if (!byRepo[item.repo_name]) byRepo[item.repo_name] = [];
+        byRepo[item.repo_name].push(item.pr_number);
+      }
+      for (const [repo, nums] of Object.entries(byRepo)) {
+        await analyzePRs(nums, true, repo);
+      }
+      alert(`Batch AI Analysis complete for ${activeItems.length} PRs in this workspace!`);
     } catch (err) {
       console.error(err);
     } finally {
@@ -206,7 +211,11 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
   }, [groups, workspaceSearch, workspaceSort]);
 
   const activeGroup = groups.find(g => g.group_id === activeGroupId);
-  const activePrObjects = prs ? prs.filter(p => activeItems.some(i => i.pr_number === (p.number ?? p.pr_number))) : [];
+  // Match on (repo, number), not number alone — otherwise PR #42 from another
+  // repository is pulled into this workspace.
+  const activeItemKeys = useMemo(() => new Set(activeItems.map(itemRefKey)), [activeItems]);
+  const activePrObjects = prs ? prs.filter(p => activeItemKeys.has(prRefKey(p))) : [];
+  const activeConflictCount = activePrObjects.filter(isConflicting).length;
 
   // Filter & Sort Active Workspace PRs
   const filteredActivePrs = useMemo(() => {
@@ -372,6 +381,16 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
                 </div>
               </div>
 
+              {/* Conflict warning for the staged set. A workspace is a candidate
+                  build, so conflicting PRs are a ship blocker, not a detail. */}
+              {activeConflictCount > 0 && (
+                <div className="workspace-conflict-banner" role="status">
+                  ⚠️ <strong>{activeConflictCount}</strong> of {activePrObjects.length} staged
+                  {activeConflictCount === 1 ? ' PR conflicts' : ' PRs conflict'} with their base
+                  branch. Resolve before building this release.
+                </div>
+              )}
+
               {/* Workspace PRs Table & Controls */}
               <div className="group-prs-table-container">
                 <div className="table-filter-bar">
@@ -412,9 +431,9 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
                     </thead>
                     <tbody>
                       {filteredActivePrs.map(pr => (
-                        <tr key={pr.number}>
+                        <tr key={prRefKey(pr)} className={isConflicting(pr) ? 'row-conflicting' : ''}>
                           <td>
-                            <button onClick={() => onSelectPr(pr.number)} className="btn-link">
+                            <button onClick={() => onSelectPr(pr.number, pr.repo_name)} className="btn-link">
                               #{pr.number}
                             </button>
                           </td>
@@ -424,6 +443,9 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
                           </td>
                           <td>
                             <span className={`badge badge-${pr.status.toLowerCase()}`}>{pr.status}</span>
+                            {isConflicting(pr) && (
+                              <span className="conflict-badge" title="Conflicts with base branch">⚠️ Conflict</span>
+                            )}
                           </td>
                           <td>
                             <span className={`risk-${pr.risk.toLowerCase()}`}>{pr.risk}</span>
@@ -468,7 +490,7 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
         onClose={() => setIsModalOpen(false)}
         onSave={handleSaveWorkspace}
         group={modalGroupTarget}
-        existingPrNumbers={modalGroupTarget ? activeItems.map(i => i.pr_number) : []}
+        existingItems={modalGroupTarget ? activeItems : []}
         allPrs={prs}
       />
     </div>

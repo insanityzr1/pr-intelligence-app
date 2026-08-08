@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { fetchPRs, syncPRs, fetchRepos } from './api/client';
+import { fetchPRs, syncPRs, fetchRepos, fetchTagsMap } from './api/client';
+import { prNumberOf, tagKeyOf, headBranchOf, baseBranchOf } from './utils/prStats';
 import Sidebar from './components/Sidebar';
 import TopHeader from './components/TopHeader';
-import MetricsBar from './components/MetricsBar';
 import PRMatrix from './components/PRMatrix';
 import PRDetailDrawer from './components/PRDetailDrawer';
 import ConflictMap from './components/ConflictMap';
@@ -18,7 +18,10 @@ export default function App() {
   const [repos, setRepos] = useState([]);
   const [selectedRepo, setSelectedRepo] = useState('');
   
-  const [selectedPrNumber, setSelectedPrNumber] = useState(null);
+  // Track the PR's own repository alongside its number. `selectedRepo` is '' when
+  // "All Repositories" is active, which previously left the drawer with no repo
+  // context at all.
+  const [selectedPr, setSelectedPr] = useState(null); // { prNumber, repoName }
   const [conflictResolverPr, setConflictResolverPr] = useState(null);
   const [showRepoManager, setShowRepoManager] = useState(false);
   
@@ -31,6 +34,9 @@ export default function App() {
   });
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  // Tags live in a separate map keyed `{repo}#{number}`; the global search needs it
+  // to be able to match on tag text.
+  const [tagsMap, setTagsMap] = useState({});
 
   // Persist sidebar collapsed state
   useEffect(() => {
@@ -67,12 +73,22 @@ export default function App() {
   useEffect(() => {
     loadRepos();
     loadPrs();
+    loadTags();
   }, [selectedRepo]);
 
   async function loadRepos() {
     try {
       const data = await fetchRepos();
       setRepos(data.repositories || []);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function loadTags() {
+    try {
+      const res = await fetchTagsMap();
+      setTagsMap(res.tags_map || {});
     } catch (err) {
       console.error(err);
     }
@@ -102,21 +118,43 @@ export default function App() {
     }
   }
 
-  // Filter PRs by search query
+  // Resolve the PR's repository from the PR itself, falling back to the active repo
+  // filter. Callers that already know the repo pass it explicitly.
+  function handleSelectPr(num, repoName) {
+    const resolved =
+      repoName ||
+      prs.find(p => prNumberOf(p) === num)?.repo_name ||
+      selectedRepo ||
+      null;
+    setSelectedPr({ prNumber: num, repoName: resolved });
+  }
+
+  // Filter PRs by search query.
+  // Field names here must track the backend payload (github_service.fetch_prs):
+  // the PR number is `number`, branches are `headRefName`/`baseRefName`, and tags
+  // arrive from the separate /tags map rather than on the PR itself.
   const filteredPrs = useMemo(() => {
     if (!searchQuery.trim()) return prs;
-    const query = searchQuery.toLowerCase().trim();
+    const rawQuery = searchQuery.toLowerCase().trim();
+    // Allow "#1874" as well as "1874".
+    const query = rawQuery.startsWith('#') ? rawQuery.slice(1) : rawQuery;
+
     return prs.filter(p => {
+      const num = prNumberOf(p);
+      const prTags = tagsMap[tagKeyOf(p)] || [];
+
       const titleMatch = p.title?.toLowerCase().includes(query);
       const authorMatch = p.author?.toLowerCase().includes(query);
-      const numMatch = String(p.pr_number).includes(query);
+      const numMatch = num != null && String(num).includes(query);
       const repoMatch = p.repo_name?.toLowerCase().includes(query);
-      const branchMatch = p.head_branch?.toLowerCase().includes(query) || p.base_branch?.toLowerCase().includes(query);
-      const tagsMatch = p.tags?.some(t => t.toLowerCase().includes(query));
+      const branchMatch =
+        headBranchOf(p).toLowerCase().includes(query) ||
+        baseBranchOf(p).toLowerCase().includes(query);
+      const tagsMatch = prTags.some(t => t.toLowerCase().includes(query));
 
       return titleMatch || authorMatch || numMatch || repoMatch || branchMatch || tagsMatch;
     });
-  }, [prs, searchQuery]);
+  }, [prs, searchQuery, tagsMap]);
 
   return (
     <div className={`app-shell ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
@@ -156,7 +194,7 @@ export default function App() {
         ) : (
           <main className="app-main">
             {activeTab === 'matrix' && (
-              <PRMatrix prs={filteredPrs} onSelectPr={num => setSelectedPrNumber(num)} />
+              <PRMatrix prs={filteredPrs} onSelectPr={handleSelectPr} />
             )}
 
             {activeTab === 'conflicts' && (
@@ -164,18 +202,18 @@ export default function App() {
             )}
 
             {activeTab === 'workspaces' && (
-              <StagingWorkspacesTab prs={filteredPrs} onSelectPr={num => setSelectedPrNumber(num)} />
+              <StagingWorkspacesTab prs={filteredPrs} onSelectPr={handleSelectPr} />
             )}
 
             {activeTab === 'release' && (
               <ReleaseBuilder prs={filteredPrs} />
             )}
 
-            {selectedPrNumber && (
+            {selectedPr && (
               <PRDetailDrawer
-                prNumber={selectedPrNumber}
-                repoName={selectedRepo}
-                onClose={() => setSelectedPrNumber(null)}
+                prNumber={selectedPr.prNumber}
+                repoName={selectedPr.repoName}
+                onClose={() => setSelectedPr(null)}
                 onResolveConflict={(num, repo) => setConflictResolverPr({ prNumber: num, repoName: repo })}
               />
             )}

@@ -22,7 +22,7 @@ def _populate_memory_cache_from_db():
                 num = pr.get("number")
                 repo_name = pr.get("repo_name", settings.DEFAULT_REPO)
                 cache_key = f"{repo_name}#{num}"
-                cached_ai = database.get_cached_ai_review(num, pr.get("head_sha", ""))
+                cached_ai = database.get_cached_ai_review(num, pr.get("head_sha", ""), repo_name)
                 if cached_ai:
                     pr["ai_review"] = cached_ai
                 _prs_cache[cache_key] = pr
@@ -40,7 +40,7 @@ def sync_prs(req: SyncRequest):
         for pr in prs:
             num = pr["number"]
             cache_key = f"{repo_name}#{num}"
-            cached_ai = database.get_cached_ai_review(num, pr["head_sha"])
+            cached_ai = database.get_cached_ai_review(num, pr["head_sha"], repo_name)
             if cached_ai:
                 pr["ai_review"] = cached_ai
             _prs_cache[cache_key] = pr
@@ -81,14 +81,18 @@ def get_pr_detail(pr_number: int, repo_name: Optional[str] = None):
     else:
         pr = _prs_cache[cache_key]
     
+    # Use the repo the PR actually belongs to — the fallback lookup above may have
+    # matched a PR from a different repository than `target_repo`.
+    pr_repo = pr.get("repo_name") or target_repo
+
     if not pr.get("ai_review"):
-        cached = database.get_cached_ai_review(pr_number, pr["head_sha"])
+        cached = database.get_cached_ai_review(pr_number, pr["head_sha"], pr_repo)
         if cached:
             pr["ai_review"] = cached
         else:
-            diff = GitHubService.fetch_pr_diff(pr_number, repo_name=pr.get("repo_name"))
+            diff = GitHubService.fetch_pr_diff(pr_number, repo_name=pr_repo)
             ai_data = AIService.analyze_pr(pr, diff)
-            database.save_ai_review(pr_number, pr["head_sha"], ai_data)
+            database.save_ai_review(pr_number, pr["head_sha"], ai_data, pr_repo)
             pr["ai_review"] = ai_data
             
     return pr
@@ -105,7 +109,7 @@ def analyze_prs(req: AnalyzeRequest):
             if req.force or not pr.get("ai_review"):
                 diff = GitHubService.fetch_pr_diff(num, repo_name=repo_name)
                 ai_data = AIService.analyze_pr(pr, diff)
-                database.save_ai_review(num, pr["head_sha"], ai_data)
+                database.save_ai_review(num, pr["head_sha"], ai_data, repo_name)
                 pr["ai_review"] = ai_data
             analyzed.append(pr)
             

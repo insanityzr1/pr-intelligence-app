@@ -1,5 +1,6 @@
 from typing import List, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from config import settings
 
 class PRSummaryItem(BaseModel):
     number: int
@@ -25,8 +26,14 @@ class PRSummaryItem(BaseModel):
     created_at: str
     created_fmt: str
     head_sha: str
-    repo_name: str = "rpnunez/wp-ai-scheduler"
+    repo_name: str = Field(default_factory=lambda: settings.DEFAULT_REPO)
     labels: List[str]
+    # Declared so FastAPI's response_model does not strip them from GET /api/prs.
+    # The UI searches and displays branch names, and the workspace picker shows
+    # the head ➜ base badge.
+    headRefName: str = ""
+    baseRefName: str = "main"
+    body: str = ""
     user_tags: Optional[List[str]] = []
     ai_review: Optional[dict] = None
 

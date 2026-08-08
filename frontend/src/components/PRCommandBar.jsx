@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { computePrStats } from '../utils/prStats';
 
 export default function PRCommandBar({
   prs = [],
@@ -38,11 +39,13 @@ export default function PRCommandBar({
   }, []);
 
   // Compute stat counts
-  const total = prs.length;
-  const mergeableCount = prs.filter(p => p.mergeable === 'MERGEABLE').length;
-  const conflictsCount = prs.filter(p => p.mergeable === 'CONFLICTING').length;
-  const highRiskCount = prs.filter(p => p.risk === 'High').length;
-  const aiAnalyzedCount = prs.filter(p => p.ai_review).length;
+  const {
+    total,
+    mergeable: mergeableCount,
+    conflicts: conflictsCount,
+    highRisk: highRiskCount,
+    aiAnalyzed: aiAnalyzedCount,
+  } = computePrStats(prs);
 
   // Calculate active dropdown filters count
   const dropdownFilters = [tagFilter, statusFilter, typeFilter, subtypeFilter, currStatusFilter, riskFilter, actionFilter];

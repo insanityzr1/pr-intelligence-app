@@ -6,21 +6,60 @@ from config import settings
 def get_db():
     conn = sqlite3.connect(settings.DB_PATH)
     conn.row_factory = sqlite3.Row
+    # Declared foreign keys (pr_group_items -> pr_groups ON DELETE CASCADE) are
+    # inert in SQLite unless this pragma is set, per-connection.
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
+
+def _migrate_ai_reviews_key(cursor):
+    """
+    Rebuild a pre-existing `ai_reviews` table that still uses the old
+    pr_number-only primary key. Existing rows are attributed to DEFAULT_REPO,
+    which is where they must have come from on a single-repo install.
+
+    No-op once the table already carries a repo_name column.
+    """
+    cols = [r["name"] for r in cursor.execute("PRAGMA table_info(ai_reviews)").fetchall()]
+    if not cols or "repo_name" in cols:
+        return
+
+    cursor.execute("ALTER TABLE ai_reviews RENAME TO ai_reviews_legacy")
+    cursor.execute("""
+    CREATE TABLE ai_reviews (
+        repo_name TEXT NOT NULL,
+        pr_number INTEGER NOT NULL,
+        head_sha TEXT NOT NULL,
+        ai_data TEXT NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (repo_name, pr_number)
+    )
+    """)
+    cursor.execute("""
+    INSERT INTO ai_reviews (repo_name, pr_number, head_sha, ai_data, updated_at)
+    SELECT ?, pr_number, head_sha, ai_data, updated_at FROM ai_reviews_legacy
+    """, (settings.DEFAULT_REPO,))
+    cursor.execute("DROP TABLE ai_reviews_legacy")
+
 
 def init_db():
     conn = get_db()
     cursor = conn.cursor()
     
     # 1. AI Review Cache
+    # Keyed by (repo_name, pr_number): a PR number alone is not unique once more
+    # than one repository is configured, and the old pr_number-only primary key
+    # meant PR #5 in one repo silently overwrote PR #5 in another.
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS ai_reviews (
-        pr_number INTEGER PRIMARY KEY,
+        repo_name TEXT NOT NULL,
+        pr_number INTEGER NOT NULL,
         head_sha TEXT NOT NULL,
         ai_data TEXT NOT NULL,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (repo_name, pr_number)
     )
     """)
+    _migrate_ai_reviews_key(cursor)
     
     # 2. Configured Repositories Table
     cursor.execute("""
@@ -112,10 +151,14 @@ def init_db():
     conn.close()
 
 # AI Reviews
-def get_cached_ai_review(pr_number: int, head_sha: str):
+def get_cached_ai_review(pr_number: int, head_sha: str, repo_name: str = None):
+    target_repo = repo_name or settings.DEFAULT_REPO
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute("SELECT ai_data FROM ai_reviews WHERE pr_number = ? AND head_sha = ?", (pr_number, head_sha))
+    cursor.execute(
+        "SELECT ai_data FROM ai_reviews WHERE repo_name = ? AND pr_number = ? AND head_sha = ?",
+        (target_repo, pr_number, head_sha),
+    )
     row = cursor.fetchone()
     conn.close()
     if row:
@@ -125,18 +168,19 @@ def get_cached_ai_review(pr_number: int, head_sha: str):
             return None
     return None
 
-def save_ai_review(pr_number: int, head_sha: str, ai_data: dict):
+def save_ai_review(pr_number: int, head_sha: str, ai_data: dict, repo_name: str = None):
+    target_repo = repo_name or settings.DEFAULT_REPO
     conn = get_db()
     cursor = conn.cursor()
     ai_json = json.dumps(ai_data)
     cursor.execute("""
-    INSERT INTO ai_reviews (pr_number, head_sha, ai_data, updated_at)
-    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(pr_number) DO UPDATE SET
+    INSERT INTO ai_reviews (repo_name, pr_number, head_sha, ai_data, updated_at)
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(repo_name, pr_number) DO UPDATE SET
         head_sha=excluded.head_sha,
         ai_data=excluded.ai_data,
         updated_at=CURRENT_TIMESTAMP
-    """, (pr_number, head_sha, ai_json))
+    """, (target_repo, pr_number, head_sha, ai_json))
     conn.commit()
     conn.close()
 

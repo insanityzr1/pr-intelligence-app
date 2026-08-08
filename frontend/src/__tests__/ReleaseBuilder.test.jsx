@@ -13,6 +13,9 @@ const samplePrs = [
     author: 'rpnunez',
     status: 'Open',
     risk: 'Low',
+    // Required: workspace items are matched on (repo_name, pr_number), since PR
+    // numbers are not unique across repositories.
+    repo_name: 'rpnunez/wp-ai-scheduler',
     headRefName: 'feature/refactor',
     baseRefName: 'main'
   }

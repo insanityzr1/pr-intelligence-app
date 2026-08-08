@@ -1,6 +1,16 @@
+import json
+import subprocess
+
+import pytest
+
 from services.ai_service import AIService
 from services.conflict_resolution_service import ConflictResolutionService
-from services.github_service import GitHubService, clean_text, extract_summary
+from services.github_service import (
+    GitHubService,
+    GitHubServiceError,
+    clean_text,
+    extract_summary,
+)
 from services.changelog_service import ChangelogService
 from services.diff_parser import DiffParser
 
@@ -71,8 +81,46 @@ def test_github_service_helpers():
     summary = extract_summary("This PR resolves race conditions in cron execution.", "Fix bug")
     assert "resolves race condition" in summary
 
-    files = GitHubService.fetch_pr_files(101)
-    assert len(files) >= 1
+
+def test_fetch_pr_files_parses_gh_json(monkeypatch):
+    """File paths come from `gh pr view --json files`, not from re-parsing the diff."""
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(
+            cmd, 0,
+            stdout=json.dumps({"files": [
+                {"path": "backend/database.py"},
+                {"path": "frontend/src/App.jsx"},
+                {"path": "backend/database.py"},  # duplicates collapse
+            ]}),
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    files = GitHubService.fetch_pr_files(1874, repo_name="acme/widgets")
+    assert files == ["backend/database.py", "frontend/src/App.jsx"]
+    assert captured["cmd"][:5] == ["gh", "pr", "view", "1874", "--json"]
+    assert "--repo" in captured["cmd"] and "acme/widgets" in captured["cmd"]
+
+
+def test_fetch_pr_diff_raises_instead_of_fabricating(monkeypatch):
+    """
+    A failed `gh` call must surface as an error. It previously returned a fake
+    "-old code / +new code" diff that was fed to the LLM as if it were real.
+    """
+    def fake_run(cmd, **kwargs):
+        raise subprocess.CalledProcessError(1, cmd, stderr="no such PR")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with pytest.raises(GitHubServiceError):
+        GitHubService.fetch_pr_diff(999, repo_name="acme/widgets")
+
+    with pytest.raises(GitHubServiceError):
+        GitHubService.fetch_pr_files(999, repo_name="acme/widgets")
 
 def test_changelog_service():
     selected_prs = [
