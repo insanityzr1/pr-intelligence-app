@@ -58,7 +58,6 @@ def sync_prs(req: SyncRequest):
 def get_prs(repo_name: Optional[str] = None):
     _populate_memory_cache_from_db()
     
-    # If DB and memory are both empty, trigger initial sync up to PR_FETCH_LIMIT
     if not _prs_cache:
         sync_prs(SyncRequest(count=settings.PR_FETCH_LIMIT, repo_name=repo_name))
         
@@ -143,22 +142,14 @@ PR Metadata:
 - Summary: {pr.get('summary')}
 
 Diff Excerpt:
-{diff[:2000]}
+{diff[:3000]}
 
 User Question:
 {user_msg}
 
-Answer concisely, accurately, and professionally. If code snippets or unit tests are requested, format them cleanly in markdown.
+Answer concisely, accurately, and professionally with respect to the user's specific question. Format code snippets or unit tests cleanly in markdown.
 """
-    try:
-        ai_resp = AIService._call_openai(prompt) if AIService._call_openai else None
-        if not ai_resp or not isinstance(ai_resp, dict):
-            ai_text = f"Analyzed PR #{pr_number}: {user_msg}\n\nKey Recommendations:\n- Review diff changes carefully.\n- Add unit tests for boundary scenarios."
-        else:
-            ai_text = ai_resp.get("ai_summary", str(ai_resp))
-    except Exception:
-        ai_text = f"Response for PR #{pr_number}: Ensure code changes in {pr.get('title')} maintain test coverage and pass static syntax checks."
-
+    ai_text = AIService.chat_response(prompt)
     database.add_pr_chat_message(pr_number, repo_name, "assistant", ai_text)
     
     history = database.get_pr_chat_history(pr_number, repo_name)
