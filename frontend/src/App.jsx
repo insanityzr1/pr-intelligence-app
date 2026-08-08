@@ -155,8 +155,6 @@ export default function App() {
           </div>
         ) : (
           <main className="app-main">
-            <MetricsBar prs={filteredPrs} />
-
             {activeTab === 'matrix' && (
               <PRMatrix prs={filteredPrs} onSelectPr={num => setSelectedPrNumber(num)} />
             )}
