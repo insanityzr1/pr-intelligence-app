@@ -5,6 +5,7 @@ import PRMatrix from './components/PRMatrix';
 import PRDetailDrawer from './components/PRDetailDrawer';
 import ConflictMap from './components/ConflictMap';
 import ReleaseBuilder from './components/ReleaseBuilder';
+import StagingWorkspacesTab from './components/StagingWorkspacesTab';
 import RepoManagerModal from './components/RepoManagerModal';
 import ConflictResolverModal from './components/ConflictResolverModal';
 import './App.css';
@@ -79,6 +80,7 @@ export default function App() {
         <div className="nav-tabs">
           <button className={`tab-btn ${activeTab === 'matrix' ? 'active' : ''}`} onClick={() => setActiveTab('matrix')}>PR Matrix</button>
           <button className={`tab-btn ${activeTab === 'conflicts' ? 'active' : ''}`} onClick={() => setActiveTab('conflicts')}>Collision Matrix</button>
+          <button className={`tab-btn ${activeTab === 'workspaces' ? 'active' : ''}`} onClick={() => setActiveTab('workspaces')}>📦 PR Workspaces</button>
           <button className={`tab-btn ${activeTab === 'release' ? 'active' : ''}`} onClick={() => setActiveTab('release')}>Release Builder</button>
         </div>
 
@@ -102,6 +104,10 @@ export default function App() {
 
           {activeTab === 'conflicts' && (
             <ConflictMap />
+          )}
+
+          {activeTab === 'workspaces' && (
+            <StagingWorkspacesTab prs={prs} onSelectPr={num => setSelectedPrNumber(num)} />
           )}
 
           {activeTab === 'release' && (

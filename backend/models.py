@@ -27,6 +27,7 @@ class PRSummaryItem(BaseModel):
     head_sha: str
     repo_name: str = "rpnunez/wp-ai-scheduler"
     labels: List[str]
+    user_tags: Optional[List[str]] = []
     ai_review: Optional[dict] = None
 
 class SyncRequest(BaseModel):
@@ -49,3 +50,15 @@ class ChatMessageRequest(BaseModel):
 
 class ChangelogRequest(BaseModel):
     pr_numbers: List[int]
+
+class TagAddRequest(BaseModel):
+    tag: str
+    repo_name: Optional[str] = None
+
+class GroupCreateRequest(BaseModel):
+    name: str
+    description: Optional[str] = ""
+
+class GroupItemAddRequest(BaseModel):
+    pr_numbers: List[int]
+    repo_name: Optional[str] = None

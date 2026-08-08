@@ -100,3 +100,72 @@ export async function fetchConflictResolution(prNumber, repoName = null) {
   if (!res.ok) throw new Error('Failed to resolve conflicts');
   return res.json();
 }
+
+// Custom Tags & Staging Groups API
+export async function fetchTagsMap() {
+  const res = await fetch(`${API_BASE}/tags`);
+  if (!res.ok) throw new Error('Failed to fetch tags');
+  return res.json();
+}
+
+export async function addPRTag(prNumber, tag, repoName = null) {
+  const res = await fetch(`${API_BASE}/prs/${prNumber}/tags`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tag, repo_name: repoName })
+  });
+  if (!res.ok) throw new Error('Failed to add tag');
+  return res.json();
+}
+
+export async function removePRTag(prNumber, tag, repoName = null) {
+  const url = repoName ? `${API_BASE}/prs/${prNumber}/tags/${encodeURIComponent(tag)}?repo_name=${encodeURIComponent(repoName)}` : `${API_BASE}/prs/${prNumber}/tags/${encodeURIComponent(tag)}`;
+  const res = await fetch(url, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to remove tag');
+  return res.json();
+}
+
+export async function fetchGroups() {
+  const res = await fetch(`${API_BASE}/groups`);
+  if (!res.ok) throw new Error('Failed to fetch groups');
+  return res.json();
+}
+
+export async function createGroup(name, description = '') {
+  const res = await fetch(`${API_BASE}/groups`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, description })
+  });
+  if (!res.ok) throw new Error('Failed to create group');
+  return res.json();
+}
+
+export async function deleteGroup(groupId) {
+  const res = await fetch(`${API_BASE}/groups/${groupId}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to delete group');
+  return res.json();
+}
+
+export async function fetchGroupItems(groupId) {
+  const res = await fetch(`${API_BASE}/groups/${groupId}/items`);
+  if (!res.ok) throw new Error('Failed to fetch group items');
+  return res.json();
+}
+
+export async function addPrsToGroup(groupId, prNumbers, repoName = null) {
+  const res = await fetch(`${API_BASE}/groups/${groupId}/items`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pr_numbers: prNumbers, repo_name: repoName })
+  });
+  if (!res.ok) throw new Error('Failed to add PRs to group');
+  return res.json();
+}
+
+export async function removePrFromGroup(groupId, prNumber, repoName = null) {
+  const url = repoName ? `${API_BASE}/groups/${groupId}/items/${prNumber}?repo_name=${encodeURIComponent(repoName)}` : `${API_BASE}/groups/${groupId}/items/${prNumber}`;
+  const res = await fetch(url, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to remove PR from group');
+  return res.json();
+}

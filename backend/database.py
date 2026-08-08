@@ -43,7 +43,7 @@ def init_db():
     )
     """)
     
-    # 4. Cached PR Summaries (Persists across cold starts / restarts)
+    # 4. Cached PR Summaries
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS prs (
         cache_key TEXT PRIMARY KEY,
@@ -51,6 +51,38 @@ def init_db():
         repo_name TEXT NOT NULL,
         pr_data TEXT NOT NULL,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    # 5. Custom PR Tags
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS pr_tags (
+        pr_number INTEGER NOT NULL,
+        repo_name TEXT NOT NULL,
+        tag TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (pr_number, repo_name, tag)
+    )
+    """)
+
+    # 6. Custom PR Staging Groups & Buckets
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS pr_groups (
+        group_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT DEFAULT '',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS pr_group_items (
+        group_id INTEGER NOT NULL,
+        pr_number INTEGER NOT NULL,
+        repo_name TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (group_id, pr_number, repo_name),
+        FOREIGN KEY (group_id) REFERENCES pr_groups(group_id) ON DELETE CASCADE
     )
     """)
     
@@ -142,7 +174,7 @@ def add_pr_chat_message(pr_number: int, repo_name: str, role: str, message: str)
     conn.commit()
     conn.close()
 
-# Persistent PR Summaries Cache across App Reloads
+# Persistent PR Summaries Cache
 def save_prs(prs_list: list, repo_name: str):
     conn = get_db()
     cursor = conn.cursor()
@@ -179,3 +211,115 @@ def get_cached_prs(repo_name: str = None) -> list:
         except Exception:
             pass
     return results
+
+# PR Custom Tags Helpers
+def get_pr_tags(pr_number: int, repo_name: str):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT tag FROM pr_tags WHERE pr_number = ? AND repo_name = ?", (pr_number, repo_name))
+    rows = cursor.fetchall()
+    conn.close()
+    return [r["tag"] for r in rows]
+
+def get_all_pr_tags_map():
+    """Returns dict mapping 'repo_name#pr_number' to list of tags"""
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT pr_number, repo_name, tag FROM pr_tags")
+    rows = cursor.fetchall()
+    conn.close()
+    res = {}
+    for r in rows:
+        key = f"{r['repo_name']}#{r['pr_number']}"
+        if key not in res:
+            res[key] = []
+        res[key].append(r["tag"])
+    return res
+
+def add_pr_tag(pr_number: int, repo_name: str, tag: str):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+    INSERT INTO pr_tags (pr_number, repo_name, tag)
+    VALUES (?, ?, ?)
+    ON CONFLICT(pr_number, repo_name, tag) DO NOTHING
+    """, (pr_number, repo_name, tag.strip()))
+    conn.commit()
+    conn.close()
+    return get_pr_tags(pr_number, repo_name)
+
+def remove_pr_tag(pr_number: int, repo_name: str, tag: str):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM pr_tags WHERE pr_number = ? AND repo_name = ? AND tag = ?", (pr_number, repo_name, tag))
+    conn.commit()
+    conn.close()
+    return get_pr_tags(pr_number, repo_name)
+
+# PR Staging Groups Helpers
+def get_groups():
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+    SELECT g.group_id, g.name, g.description, g.created_at,
+           COUNT(i.pr_number) as item_count
+    FROM pr_groups g
+    LEFT JOIN pr_group_items i ON g.group_id = i.group_id
+    GROUP BY g.group_id
+    ORDER BY g.created_at DESC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def create_group(name: str, description: str = ""):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+    INSERT INTO pr_groups (name, description) VALUES (?, ?)
+    """, (name.strip(), description.strip()))
+    group_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return {"group_id": group_id, "name": name, "description": description}
+
+def delete_group(group_id: int):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM pr_groups WHERE group_id = ?", (group_id,))
+    conn.commit()
+    conn.close()
+    return True
+
+def get_group_items(group_id: int):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+    SELECT pr_number, repo_name, created_at
+    FROM pr_group_items
+    WHERE group_id = ?
+    """, (group_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def add_prs_to_group(group_id: int, pr_numbers: list, repo_name: str):
+    conn = get_db()
+    cursor = conn.cursor()
+    for num in pr_numbers:
+        cursor.execute("""
+        INSERT INTO pr_group_items (group_id, pr_number, repo_name)
+        VALUES (?, ?, ?)
+        ON CONFLICT(group_id, pr_number, repo_name) DO NOTHING
+        """, (group_id, num, repo_name))
+    conn.commit()
+    conn.close()
+    return get_group_items(group_id)
+
+def remove_pr_from_group(group_id: int, pr_number: int, repo_name: str):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM pr_group_items WHERE group_id = ? AND pr_number = ? AND repo_name = ?", (group_id, pr_number, repo_name))
+    conn.commit()
+    conn.close()
+    return get_group_items(group_id)

@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { fetchPRDetail, analyzePRs, fetchPRChatHistory, postPRChatMessage } from '../api/client';
+import { fetchPRDetail, analyzePRs, fetchPRChatHistory, postPRChatMessage, fetchTagsMap } from '../api/client';
 import FormattedMarkdown from './FormattedMarkdown';
+import PRTagBar from './PRTagBar';
 
 export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveConflict }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [pr, setPr] = useState(null);
+  const [activeTags, setActiveTags] = useState([]);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
 
@@ -18,6 +20,7 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
     if (prNumber) {
       loadDetail();
       loadChat();
+      loadPRTags();
     }
     return () => {
       document.body.style.overflow = 'unset';
@@ -33,6 +36,17 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadPRTags() {
+    try {
+      const res = await fetchTagsMap();
+      const targetRepo = repoName || 'rpnunez/wp-ai-scheduler';
+      const key = `${targetRepo}#${prNumber}`;
+      setActiveTags(res.tags_map?.[key] || []);
+    } catch (err) {
+      console.error(err);
     }
   }
 
@@ -101,6 +115,14 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
             <button className="close-btn" onClick={onClose}>&times;</button>
           </div>
         </div>
+
+        {/* PR Tagging & Flagging Bar */}
+        <PRTagBar
+          prNumber={prNumber}
+          repoName={repoName || pr?.repo_name}
+          activeTags={activeTags}
+          onTagsUpdated={loadPRTags}
+        />
 
         {/* Subtabs */}
         <div className="drawer-subtabs">

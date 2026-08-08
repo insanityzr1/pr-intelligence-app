@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { fetchTagsMap } from '../api/client';
 
 export default function PRMatrix({ prs, onSelectPr }) {
   const [search, setSearch] = useState('');
@@ -8,9 +9,24 @@ export default function PRMatrix({ prs, onSelectPr }) {
   const [currStatusFilter, setCurrStatusFilter] = useState('');
   const [riskFilter, setRiskFilter] = useState('');
   const [actionFilter, setActionFilter] = useState('');
+  const [tagFilter, setTagFilter] = useState('');
 
+  const [tagsMap, setTagsMap] = useState({});
   const [sortKey, setSortKey] = useState('updated_at');
   const [sortDir, setSortDir] = useState('desc');
+
+  useEffect(() => {
+    loadTags();
+  }, []);
+
+  async function loadTags() {
+    try {
+      const res = await fetchTagsMap();
+      setTagsMap(res.tags_map || {});
+    } catch (err) {
+      console.error(err);
+    }
+  }
 
   const statuses = Array.from(new Set(prs.map(p => p.status))).sort();
   const types = Array.from(new Set(prs.map(p => p.type))).sort();
@@ -19,7 +35,15 @@ export default function PRMatrix({ prs, onSelectPr }) {
   const risks = ['Low', 'Medium', 'High'];
   const actions = Array.from(new Set(prs.map(p => p.rec_action))).sort();
 
+  // Extract all unique tags present across PRs
+  const allTagsSet = new Set();
+  Object.values(tagsMap).forEach(list => list.forEach(t => allTagsSet.add(t)));
+  const availableTags = Array.from(allTagsSet).sort();
+
   const filtered = prs.filter(pr => {
+    const key = `${pr.repo_name}#${pr.number}`;
+    const prTags = tagsMap[key] || [];
+
     const mSearch = !search || 
       pr.id_str.toLowerCase().includes(search.toLowerCase()) || 
       pr.title.toLowerCase().includes(search.toLowerCase()) || 
@@ -32,8 +56,9 @@ export default function PRMatrix({ prs, onSelectPr }) {
     const mCurrStatus = !currStatusFilter || pr.current_status === currStatusFilter;
     const mRisk = !riskFilter || pr.risk === riskFilter;
     const mAction = !actionFilter || pr.rec_action === actionFilter;
+    const mTag = !tagFilter || prTags.includes(tagFilter);
 
-    return mSearch && mStatus && mType && mSubtype && mCurrStatus && mRisk && mAction;
+    return mSearch && mStatus && mType && mSubtype && mCurrStatus && mRisk && mAction && mTag;
   });
 
   const sorted = [...filtered].sort((a, b) => {
@@ -63,6 +88,13 @@ export default function PRMatrix({ prs, onSelectPr }) {
           <div className="filter-group">
             <label>Search Text</label>
             <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search PR ID, title, summary..." />
+          </div>
+          <div className="filter-group">
+            <label>Filter by Tag / Flag</label>
+            <select value={tagFilter} onChange={e => setTagFilter(e.target.value)}>
+              <option value="">All Tags & Flags ({availableTags.length})</option>
+              {availableTags.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
           </div>
           <div className="filter-group">
             <label>Status</label>
@@ -115,7 +147,7 @@ export default function PRMatrix({ prs, onSelectPr }) {
             <tr>
               <th onClick={() => handleSort('number')}>PR ID {sortKey === 'number' && (sortDir === 'asc' ? '▲' : '▼')}</th>
               <th onClick={() => handleSort('updated_at')}>Last Updated {sortKey === 'updated_at' && (sortDir === 'asc' ? '▲' : '▼')}</th>
-              <th onClick={() => handleSort('title')}>Title & Summary {sortKey === 'title' && (sortDir === 'asc' ? '▲' : '▼')}</th>
+              <th onClick={() => handleSort('title')}>Title, Flags & Summary {sortKey === 'title' && (sortDir === 'asc' ? '▲' : '▼')}</th>
               <th onClick={() => handleSort('status')}>Status {sortKey === 'status' && (sortDir === 'asc' ? '▲' : '▼')}</th>
               <th onClick={() => handleSort('type')}>Type {sortKey === 'type' && (sortDir === 'asc' ? '▲' : '▼')}</th>
               <th onClick={() => handleSort('subtype')}>Subtype {sortKey === 'subtype' && (sortDir === 'asc' ? '▲' : '▼')}</th>
@@ -128,29 +160,38 @@ export default function PRMatrix({ prs, onSelectPr }) {
             {sorted.length === 0 ? (
               <tr><td colSpan="9" className="empty-cell">No matching pull requests found.</td></tr>
             ) : (
-              sorted.map(pr => (
-                <tr key={pr.number} onClick={() => onSelectPr(pr.number)} className="clickable-row">
-                  <td><a className="pr-link" href={pr.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>{pr.id_str}</a></td>
-                  <td className="updated-cell">{pr.updated_rel}</td>
-                  <td>
-                    <div className="pr-title">{pr.title}</div>
-                    <div className="pr-summary">{pr.summary}</div>
-                    <div className="pr-created">Created: {pr.created_fmt}</div>
-                  </td>
-                  <td>
-                    <span className={`badge ${pr.status === 'Draft' ? 'badge-draft' : 'badge-open'}`}>{pr.status}</span>
-                  </td>
-                  <td>{pr.type}</td>
-                  <td>{pr.subtype}</td>
-                  <td>
-                    <span className={`badge ${pr.mergeable === 'CONFLICTING' ? 'badge-conflict' : (pr.current_status === 'Ready to merge' ? 'badge-ready' : 'badge-review')}`}>
-                      {pr.mergeable === 'CONFLICTING' ? '⚠️ Conflicts' : pr.current_status}
-                    </span>
-                  </td>
-                  <td className={`risk-${pr.risk.toLowerCase()}`}>{pr.risk_detail}</td>
-                  <td>{pr.rec_action}</td>
-                </tr>
-              ))
+              sorted.map(pr => {
+                const prKey = `${pr.repo_name}#${pr.number}`;
+                const rowTags = tagsMap[prKey] || [];
+                return (
+                  <tr key={pr.number} onClick={() => onSelectPr(pr.number)} className="clickable-row">
+                    <td><a className="pr-link" href={pr.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>{pr.id_str}</a></td>
+                    <td className="updated-cell">{pr.updated_rel}</td>
+                    <td>
+                      <div className="pr-title">{pr.title}</div>
+                      {rowTags.length > 0 && (
+                        <div className="row-tags-list">
+                          {rowTags.map(t => <span key={t} className="row-tag-badge">{t}</span>)}
+                        </div>
+                      )}
+                      <div className="pr-summary">{pr.summary}</div>
+                      <div className="pr-created">Created: {pr.created_fmt}</div>
+                    </td>
+                    <td>
+                      <span className={`badge ${pr.status === 'Draft' ? 'badge-draft' : 'badge-open'}`}>{pr.status}</span>
+                    </td>
+                    <td>{pr.type}</td>
+                    <td>{pr.subtype}</td>
+                    <td>
+                      <span className={`badge ${pr.mergeable === 'CONFLICTING' ? 'badge-conflict' : (pr.current_status === 'Ready to merge' ? 'badge-ready' : 'badge-review')}`}>
+                        {pr.mergeable === 'CONFLICTING' ? '⚠️ Conflicts' : pr.current_status}
+                      </span>
+                    </td>
+                    <td className={`risk-${pr.risk.toLowerCase()}`}>{pr.risk_detail}</td>
+                    <td>{pr.rec_action}</td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>

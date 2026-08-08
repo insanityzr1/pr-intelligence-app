@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from config import settings
 from database import init_db
-from routers import prs, conflicts, changelog, export, repos
+from routers import prs, conflicts, changelog, export, repos, tags
 
 def parse_cli_args():
     parser = argparse.ArgumentParser(description="PR Intelligence FastAPI Server")
@@ -16,6 +16,7 @@ def parse_cli_args():
     parser.add_argument("--reload", action="store_true", default=None, help="Enable auto-reload on code changes")
     parser.add_argument("--debug", action="store_true", default=None, help="Enable debug mode")
     parser.add_argument("--ai-provider", type=str, help="Preferred AI provider (auto, gemini, openai, anthropic, ollama)")
+    parser.add_argument("--pr-fetch-limit", type=int, help="Max PR fetch limit")
     parser.add_argument("--db-path", type=str, help="Custom SQLite database file path")
     parser.add_argument("--log-level", type=str, help="Logging level (info, debug, warning, error)")
     
@@ -55,6 +56,7 @@ app.include_router(conflicts.router)
 app.include_router(changelog.router)
 app.include_router(export.router)
 app.include_router(repos.router)
+app.include_router(tags.router)
 
 # Serve Frontend static build if present
 frontend_dist = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
