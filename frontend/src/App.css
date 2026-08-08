@@ -324,7 +324,7 @@ td {
 }
 
 .modal-narrow { max-width: 520px; height: auto; align-self: center; margin: 0 auto; border-radius: 0.75rem; }
-.modal-wide { max-width: 900px; height: auto; align-self: center; margin: 0 auto; border-radius: 0.75rem; }
+.modal-wide { max-width: 920px; height: auto; align-self: center; margin: 0 auto; border-radius: 0.75rem; }
 
 .drawer-header {
   display: flex;
@@ -615,21 +615,84 @@ td {
   font-size: 0.875rem;
 }
 
-/* Conflict Resolver & Terminal Wizard */
+/* Conflict Resolver & Step Groups */
+.conflict-actions-bar {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.conflict-analysis-card {
+  background-color: var(--bg-color);
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.resolution-steps-container {
+  margin-bottom: 1.5rem;
+}
+
+.step-group-card {
+  background-color: var(--bg-color);
+  border: 1px solid var(--border-color);
+  border-radius: 0.625rem;
+  padding: 1.25rem;
+  margin-top: 1rem;
+}
+
+.step-group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.step-group-header h4 {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: #a5b4fc;
+}
+
+.step-explanation {
+  font-size: 0.875rem;
+  color: #cbd5e1;
+  margin-bottom: 1rem;
+  line-height: 1.5;
+}
+
+.step-commands-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.btn-copy-sm {
+  background-color: var(--card-bg);
+  color: var(--accent-color);
+  border: 1px solid var(--border-color);
+  padding: 0.25rem 0.625rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-copy-sm:hover {
+  background-color: var(--accent-color);
+  color: white;
+}
+
 .terminal-wizard {
   background-color: var(--bg-color);
   border: 1px solid var(--border-color);
   border-radius: 0.5rem;
   padding: 1rem;
   margin: 1.5rem 0;
-}
-
-.wizard-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1rem;
-  font-weight: 600;
 }
 
 .commands-list {
@@ -643,9 +706,15 @@ td {
   justify-content: space-between;
   align-items: center;
   background-color: #020617;
-  padding: 0.5rem 0.75rem;
+  padding: 0.625rem 0.875rem;
   border-radius: 0.375rem;
   font-family: monospace;
+  font-size: 0.84375rem;
+}
+
+.command-row code {
+  color: #38bdf8;
+  word-break: break-all;
 }
 
 .btn-copy {
@@ -656,6 +725,7 @@ td {
   border-radius: 0.25rem;
   font-size: 0.75rem;
   cursor: pointer;
+  margin-left: 0.5rem;
 }
 
 .btn-copy:hover { color: white; background-color: var(--accent-color); }
@@ -668,6 +738,7 @@ td {
   color: #38bdf8;
   font-family: monospace;
   font-size: 0.8125rem;
+  margin-top: 0.5rem;
 }
 
 /* Repo Manager Modal */

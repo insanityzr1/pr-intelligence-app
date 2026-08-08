@@ -45,7 +45,6 @@ def get_pr_detail(pr_number: int, repo_name: Optional[str] = "rpnunez/wp-ai-sche
     cache_key = f"{repo_name}#{pr_number}"
     
     if cache_key not in _prs_cache:
-        # Fallback search
         found = [p for p in _prs_cache.values() if p["number"] == pr_number]
         if found:
             pr = found[0]
@@ -98,15 +97,12 @@ def post_chat_message(pr_number: int, req: ChatMessageRequest):
     if not user_msg:
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
         
-    # Save user message to persistent SQLite database
     database.add_pr_chat_message(pr_number, repo_name, "user", user_msg)
     
-    # Fetch PR context
     cache_key = f"{repo_name}#{pr_number}"
     pr = _prs_cache.get(cache_key, {"number": pr_number, "title": "PR"})
     diff = GitHubService.fetch_pr_diff(pr_number, repo_name=repo_name)
     
-    # Prompt LLM with PR context + User question
     prompt = f"""
 You are an expert AI pair programming assistant and code reviewer analyzing PR #{pr_number} ({pr.get('title')}) in `{repo_name}`.
 
@@ -132,7 +128,6 @@ Answer concisely, accurately, and professionally. If code snippets or unit tests
     except Exception:
         ai_text = f"Response for PR #{pr_number}: Ensure code changes in {pr.get('title')} maintain test coverage and pass static syntax checks."
 
-    # Save assistant response to DB
     database.add_pr_chat_message(pr_number, repo_name, "assistant", ai_text)
     
     history = database.get_pr_chat_history(pr_number, repo_name)
@@ -147,6 +142,21 @@ def resolve_conflicts(pr_number: int, repo_name: Optional[str] = "rpnunez/wp-ai-
     
     conflict_info = ConflictResolutionService.resolve_conflicts(pr, diff)
     return {"pr_number": pr_number, "conflict_info": conflict_info}
+
+@router.get("/{pr_number}/conflict-bash-script")
+def get_conflict_bash_script(pr_number: int, repo_name: Optional[str] = "rpnunez/wp-ai-scheduler"):
+    cache_key = f"{repo_name}#{pr_number}"
+    pr = _prs_cache.get(cache_key, {"number": pr_number, "title": "Conflicting PR", "repo_name": repo_name})
+    diff = GitHubService.fetch_pr_diff(pr_number, repo_name=repo_name)
+    
+    conflict_info = ConflictResolutionService.resolve_conflicts(pr, diff)
+    bash_text = ConflictResolutionService.generate_bash_script(pr_number, conflict_info)
+    
+    return PlainTextResponse(
+        content=bash_text,
+        media_type="application/x-sh",
+        headers={"Content-Disposition": f"attachment; filename=resolve_conflict_pr_{pr_number}.sh"}
+    )
 
 @router.get("/{pr_number}/conflict-patch")
 def get_conflict_patch(pr_number: int, repo_name: Optional[str] = "rpnunez/wp-ai-scheduler"):

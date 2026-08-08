@@ -60,7 +60,6 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
     setChatInput('');
     setSendingChat(true);
     
-    // Optimistic UI append
     setChatHistory(prev => [...prev, { role: 'user', message: msg, created_at: 'Just now' }]);
 
     try {
@@ -103,7 +102,7 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
               <a href={pr.url} target="_blank" rel="noreferrer" className="btn btn-secondary">Open on GitHub ↗</a>
               {pr.mergeable === 'CONFLICTING' && (
                 <button onClick={() => onResolveConflict(prNumber, pr.repo_name)} className="btn btn-warning">
-                  ⚠️ AI Conflict Resolver
+                  ⚠️ Conflict Resolver
                 </button>
               )}
               <button onClick={handleReAnalyze} disabled={analyzing} className="btn btn-primary">
