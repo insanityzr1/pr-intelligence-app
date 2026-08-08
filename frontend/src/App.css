@@ -526,6 +526,166 @@ td {
   margin-top: 0.5rem;
 }
 
+/* Release Builder & Typeahead Search */
+.release-builder-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.button-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.builder-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+@media (max-width: 992px) {
+  .builder-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pr-selector-list {
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.typeahead-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.typeahead-label {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.typeahead-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.typeahead-input {
+  width: 100%;
+  background-color: var(--bg-color);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 0.625rem 2.25rem 0.625rem 0.875rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.clear-search-btn {
+  position: absolute;
+  right: 0.75rem;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 1.125rem;
+  cursor: pointer;
+}
+
+.results-count {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.pr-checkbox-scroll {
+  max-height: 520px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-right: 0.375rem;
+}
+
+.pr-checkbox-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  background-color: var(--bg-color);
+  border: 1px solid var(--border-color);
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.pr-checkbox-item.selected {
+  border-color: var(--accent-color);
+  background-color: rgba(99, 102, 241, 0.1);
+}
+
+.pr-checkbox-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.branch-badge {
+  font-family: monospace;
+  font-size: 0.75rem;
+  background-color: #020617;
+  color: #38bdf8;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  white-space: nowrap;
+}
+
+.pr-type-meta {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  display: block;
+  margin-top: 0.25rem;
+}
+
+.changelog-output {
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.markdown-box {
+  background-color: var(--bg-color);
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  padding: 1.25rem;
+  max-height: 580px;
+  overflow-y: auto;
+}
+
 /* Rendered Markdown Typography */
 .markdown-rendered {
   color: #cbd5e1;
