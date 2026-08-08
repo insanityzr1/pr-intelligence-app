@@ -1,13 +1,14 @@
 import json
+from config import settings
 from services.github_service import GitHubService
 from services.ai_service import AIService
 
 class ConflictResolutionService:
     @staticmethod
     def resolve_conflicts(pr_data: dict, diff_text: str) -> dict:
-        pr_number = pr_data.get('number')
+        pr_number = pr_data.get('number', 0)
         repo_name = pr_data.get('repo_name', 'rpnunez/wp-ai-scheduler')
-        title = pr_data.get('title', '')
+        title = pr_data.get('title', 'Conflicting PR')
         head_branch = pr_data.get('headRefName', f'branch-pr-{pr_number}')
         base_branch = pr_data.get('baseRefName', 'main')
 
@@ -81,13 +82,24 @@ Respond ONLY with a valid JSON object matching this exact structure:
   "resolved_code_preview": "// 3-way clean resolved code snippet preview\\nfunction example() {{\\n  // Unified resolved logic\\n}}"
 }}
 """
+        res = None
         try:
-            res = AIService._call_openai(prompt) if AIService._call_openai else None
-            if not res or not isinstance(res, dict) or "conflict_cause" not in res:
+            # Respect configured AI provider with fallbacks
+            if settings.GEMINI_API_KEY and settings.AI_PROVIDER in ["auto", "gemini"]:
                 res = AIService._call_gemini(prompt)
+            elif settings.OPENAI_API_KEY and settings.AI_PROVIDER in ["auto", "openai"]:
+                res = AIService._call_openai(prompt)
+            elif settings.ANTHROPIC_API_KEY and settings.AI_PROVIDER in ["auto", "anthropic"]:
+                res = AIService._call_anthropic(prompt)
+        except Exception as e:
+            print(f"AI Conflict Resolution API call error: {e}")
+
+        # Validate that the response contains valid conflict resolution structure
+        if isinstance(res, dict) and "conflict_cause" in res and "resolution_steps" in res:
             return res
-        except Exception:
-            return ConflictResolutionService._heuristic_conflict_fallback(pr_number, head_branch, base_branch, title)
+
+        # Robust heuristic fallback guarantees non-empty UI under all conditions
+        return ConflictResolutionService._heuristic_conflict_fallback(pr_number, head_branch, base_branch, title)
 
     @staticmethod
     def _heuristic_conflict_fallback(pr_number: int, head_branch: str, base_branch: str, title: str) -> dict:
@@ -172,7 +184,6 @@ Respond ONLY with a valid JSON object matching this exact structure:
                 lines.append(f'echo "========================================================"')
                 lines.append(f'echo "➜ {title}"')
                 if exp:
-                    # Sanitize quotes for echo
                     clean_exp = exp.replace('"', '\\"')
                     lines.append(f'echo "   Explanation: {clean_exp}"')
                 lines.append(f'echo "========================================================"')
