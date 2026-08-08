@@ -50,6 +50,8 @@ class ChatMessageRequest(BaseModel):
 
 class ChangelogRequest(BaseModel):
     pr_numbers: List[int]
+    workspace_name: Optional[str] = None
+    group_id: Optional[int] = None
 
 class TagAddRequest(BaseModel):
     tag: str

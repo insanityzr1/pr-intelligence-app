@@ -48,6 +48,16 @@ def create_group(req: GroupCreateRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to create group: {e}")
 
+@router.put("/groups/{group_id}")
+def update_group(group_id: int, req: GroupCreateRequest):
+    if not req.name.strip():
+        raise HTTPException(status_code=400, detail="Group name cannot be empty.")
+    try:
+        group = database.update_group(group_id, req.name, req.description or "")
+        return {"status": "success", "group": group}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to update group: {e}")
+
 @router.delete("/groups/{group_id}")
 def delete_group(group_id: int):
     database.delete_group(group_id)

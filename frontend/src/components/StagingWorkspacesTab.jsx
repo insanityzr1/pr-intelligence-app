@@ -1,20 +1,26 @@
-import React, { useState, useEffect } from 'react';
-import { fetchGroups, createGroup, deleteGroup, fetchGroupItems, addPrsToGroup, removePrFromGroup, analyzePRs, generateChangelog } from '../api/client';
+import React, { useState, useEffect, useMemo } from 'react';
+import { fetchGroups, createGroup, updateGroup, deleteGroup, fetchGroupItems, addPrsToGroup, removePrFromGroup, analyzePRs, generateChangelog } from '../api/client';
 import FormattedMarkdown from './FormattedMarkdown';
+import WorkspaceModal from './WorkspaceModal';
 
 export default function StagingWorkspacesTab({ prs, onSelectPr }) {
   const [groups, setGroups] = useState([]);
   const [activeGroupId, setActiveGroupId] = useState(null);
   const [activeItems, setActiveItems] = useState([]);
-  
-  // New Group Form
-  const [newGroupName, setNewGroupName] = useState('');
-  const [newGroupDesc, setNewGroupDesc] = useState('');
-  const [creatingGroup, setCreatingGroup] = useState(false);
-  
-  // Add PR to Group Modal / Selector
-  const [selectedPrToAdd, setSelectedPrToAdd] = useState('');
-  
+
+  // Workspaces Directory Search & Sort
+  const [workspaceSearch, setWorkspaceSearch] = useState('');
+  const [workspaceSort, setWorkspaceSort] = useState('updated'); // 'updated', 'name', 'count'
+
+  // Workspace PR Table Filter & Sort
+  const [prTableSearch, setPrTableSearch] = useState('');
+  const [prSortField, setPrSortField] = useState('number'); // 'number', 'title', 'status', 'risk'
+  const [prSortAsc, setPrSortAsc] = useState(true);
+
+  // Modal State
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalGroupTarget, setModalGroupTarget] = useState(null); // null = create mode, group object = edit mode
+
   // Batch Action States
   const [batchAnalyzing, setBatchAnalyzing] = useState(false);
   const [batchChangelog, setBatchChangelog] = useState(null);
@@ -26,15 +32,18 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
   useEffect(() => {
     if (activeGroupId) {
       loadGroupItems(activeGroupId);
+    } else {
+      setActiveItems([]);
     }
   }, [activeGroupId]);
 
   async function loadGroups() {
     try {
       const data = await fetchGroups();
-      setGroups(data.groups || []);
-      if (data.groups?.length > 0 && !activeGroupId) {
-        setActiveGroupId(data.groups[0].group_id);
+      const loaded = data.groups || [];
+      setGroups(loaded);
+      if (loaded.length > 0 && !activeGroupId) {
+        setActiveGroupId(loaded[0].group_id);
       }
     } catch (err) {
       console.error(err);
@@ -50,24 +59,19 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
     }
   }
 
-  async function handleCreateGroup(e) {
-    e.preventDefault();
-    if (!newGroupName.trim()) return;
-    setCreatingGroup(true);
-    try {
-      const res = await createGroup(newGroupName.trim(), newGroupDesc.trim());
-      setNewGroupName('');
-      setNewGroupDesc('');
-      await loadGroups();
-      setActiveGroupId(res.group.group_id);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setCreatingGroup(false);
-    }
+  function handleOpenCreateModal() {
+    setModalGroupTarget(null);
+    setIsModalOpen(true);
   }
 
-  async function handleDeleteGroup(gId) {
+  function handleOpenEditModal(g, e) {
+    if (e) e.stopPropagation();
+    setModalGroupTarget(g);
+    setIsModalOpen(true);
+  }
+
+  async function handleDeleteGroup(gId, e) {
+    if (e) e.stopPropagation();
     try {
       await deleteGroup(gId);
       await loadGroups();
@@ -75,23 +79,6 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
         setActiveGroupId(null);
         setActiveItems([]);
       }
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  async function handleAddPrToGroup(e) {
-    e.preventDefault();
-    if (!selectedPrToAdd || !activeGroupId) return;
-    const num = parseInt(selectedPrToAdd);
-    const prItem = prs.find(p => p.number === num);
-    const repo = prItem?.repo_name || 'rpnunez/wp-ai-scheduler';
-    
-    try {
-      await addPrsToGroup(activeGroupId, [num], repo);
-      setSelectedPrToAdd('');
-      await loadGroupItems(activeGroupId);
-      await loadGroups();
     } catch (err) {
       console.error(err);
     }
@@ -105,6 +92,67 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
       await loadGroups();
     } catch (err) {
       console.error(err);
+    }
+  }
+
+  async function handleSaveWorkspace({ group_id, name, description, selectedPrNumbers }) {
+    try {
+      let targetGId = group_id;
+      if (group_id) {
+        // Edit existing group
+        await updateGroup(group_id, name, description);
+        
+        // Compute delta of PRs
+        const existingItems = await fetchGroupItems(group_id);
+        const currentNums = (existingItems.items || []).map(i => i.pr_number);
+        
+        const addedNums = selectedPrNumbers.filter(n => !currentNums.includes(n));
+        const removedNums = currentNums.filter(n => !selectedPrNumbers.includes(n));
+
+        if (addedNums.length > 0) {
+          const prsByRepo = {};
+          for (const num of addedNums) {
+            const prObj = prs.find(p => (p.number ?? p.pr_number) === num);
+            const repo = prObj?.repo_name || 'rpnunez/wp-ai-scheduler';
+            if (!prsByRepo[repo]) prsByRepo[repo] = [];
+            prsByRepo[repo].push(num);
+          }
+          for (const [repo, nums] of Object.entries(prsByRepo)) {
+            await addPrsToGroup(group_id, nums, repo);
+          }
+        }
+
+        for (const rNum of removedNums) {
+          const prObj = prs.find(p => (p.number ?? p.pr_number) === rNum);
+          await removePrFromGroup(group_id, rNum, prObj?.repo_name || 'rpnunez/wp-ai-scheduler');
+        }
+      } else {
+        // Create new group
+        const res = await createGroup(name, description);
+        targetGId = res.group?.group_id;
+        
+        if (targetGId && selectedPrNumbers.length > 0) {
+          const prsByRepo = {};
+          for (const num of selectedPrNumbers) {
+            const prObj = prs.find(p => (p.number ?? p.pr_number) === num);
+            const repo = prObj?.repo_name || 'rpnunez/wp-ai-scheduler';
+            if (!prsByRepo[repo]) prsByRepo[repo] = [];
+            prsByRepo[repo].push(num);
+          }
+          for (const [repo, nums] of Object.entries(prsByRepo)) {
+            await addPrsToGroup(targetGId, nums, repo);
+          }
+        }
+      }
+
+      await loadGroups();
+      if (targetGId) {
+        setActiveGroupId(targetGId);
+        await loadGroupItems(targetGId);
+      }
+    } catch (err) {
+      console.error(err);
+      throw err;
     }
   }
 
@@ -126,55 +174,133 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
     if (activeItems.length === 0) return;
     const prNums = activeItems.map(i => i.pr_number);
     try {
-      const res = await generateChangelog(prNums);
+      const res = await generateChangelog(prNums, activeGroup?.name);
       setBatchChangelog(res.markdown);
     } catch (err) {
       console.error(err);
     }
   }
 
+  // Filter & Sort Workspaces Directory
+  const filteredGroups = useMemo(() => {
+    let list = [...groups];
+    if (workspaceSearch.trim()) {
+      const q = workspaceSearch.toLowerCase().trim();
+      list = list.filter(g => g.name.toLowerCase().includes(q) || (g.description && g.description.toLowerCase().includes(q)));
+    }
+
+    list.sort((a, b) => {
+      if (workspaceSort === 'name') {
+        return a.name.localeCompare(b.name);
+      } else if (workspaceSort === 'count') {
+        return (b.item_count || 0) - (a.item_count || 0);
+      } else {
+        // 'updated'
+        const dateA = new Date(a.updated_at || a.created_at || 0);
+        const dateB = new Date(b.updated_at || b.created_at || 0);
+        return dateB - dateA;
+      }
+    });
+
+    return list;
+  }, [groups, workspaceSearch, workspaceSort]);
+
   const activeGroup = groups.find(g => g.group_id === activeGroupId);
-  const activePrObjects = prs.filter(p => activeItems.some(i => i.pr_number === p.number));
+  const activePrObjects = prs ? prs.filter(p => activeItems.some(i => i.pr_number === (p.number ?? p.pr_number))) : [];
+
+  // Filter & Sort Active Workspace PRs
+  const filteredActivePrs = useMemo(() => {
+    let list = [...activePrObjects];
+    if (prTableSearch.trim()) {
+      const q = prTableSearch.toLowerCase().trim();
+      list = list.filter(p => (
+        p.title?.toLowerCase().includes(q) ||
+        p.author?.toLowerCase().includes(q) ||
+        p.number.toString().includes(q) ||
+        p.type?.toLowerCase().includes(q) ||
+        p.status?.toLowerCase().includes(q)
+      ));
+    }
+
+    list.sort((a, b) => {
+      let valA = a[prSortField] || '';
+      let valB = b[prSortField] || '';
+      if (typeof valA === 'string') valA = valA.toLowerCase();
+      if (typeof valB === 'string') valB = valB.toLowerCase();
+
+      if (valA < valB) return prSortAsc ? -1 : 1;
+      if (valA > valB) return prSortAsc ? 1 : -1;
+      return 0;
+    });
+
+    return list;
+  }, [activePrObjects, prTableSearch, prSortField, prSortAsc]);
+
+  function handlePrSort(field) {
+    if (prSortField === field) {
+      setPrSortAsc(!prSortAsc);
+    } else {
+      setPrSortField(field);
+      setPrSortAsc(true);
+    }
+  }
+
+  function formatUpdated(dateStr) {
+    if (!dateStr) return 'Recently';
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+      return dateStr;
+    }
+  }
 
   return (
     <div className="staging-workspaces-container">
+      {/* Top Header Bar */}
       <div className="staging-header">
         <div>
-          <h2>📦 PR Staging Groups & Workspaces</h2>
+          <h2>📦 PR Workspaces & Release Buckets</h2>
           <p>Organize PRs into custom release buckets, track group progress, and execute batch AI operations.</p>
         </div>
+        <button onClick={handleOpenCreateModal} className="btn btn-primary btn-add-workspace">
+          + Add Workspace
+        </button>
       </div>
 
       <div className="staging-grid">
-        {/* Left Sidebar: Bucket List & Create Form */}
+        {/* Left Sidebar: Workspaces Directory List */}
         <div className="staging-sidebar">
-          <h3>Create Staging Bucket</h3>
-          <form onSubmit={handleCreateGroup} className="create-group-form">
-            <input
-              type="text"
-              placeholder="e.g. Feature Release v2.9"
-              value={newGroupName}
-              onChange={e => setNewGroupName(e.target.value)}
-              disabled={creatingGroup}
-            />
-            <input
-              type="text"
-              placeholder="Optional description..."
-              value={newGroupDesc}
-              onChange={e => setNewGroupDesc(e.target.value)}
-              disabled={creatingGroup}
-            />
-            <button type="submit" className="btn btn-primary btn-sm" disabled={creatingGroup || !newGroupName.trim()}>
-              {creatingGroup ? 'Creating...' : '+ Create Workspace Bucket'}
-            </button>
-          </form>
+          <div className="directory-header">
+            <h3>Workspaces ({filteredGroups.length})</h3>
+            <div className="directory-controls">
+              <input
+                type="text"
+                placeholder="Filter workspaces..."
+                value={workspaceSearch}
+                onChange={e => setWorkspaceSearch(e.target.value)}
+                className="directory-search-input"
+              />
+              <select
+                value={workspaceSort}
+                onChange={e => setWorkspaceSort(e.target.value)}
+                className="directory-sort-select"
+                title="Sort Workspaces"
+              >
+                <option value="updated">Sort: Date Updated</option>
+                <option value="name">Sort: Name (A-Z)</option>
+                <option value="count">Sort: PR Count</option>
+              </select>
+            </div>
+          </div>
 
-          <h3 className="sidebar-section-title">Your Workspaces ({groups.length})</h3>
-          {groups.length === 0 ? (
-            <div className="empty-box">No staging buckets created yet. Create one above!</div>
+          {filteredGroups.length === 0 ? (
+            <div className="empty-box card-empty">
+              No workspaces found. Click <strong>+ Add Workspace</strong> above to create one!
+            </div>
           ) : (
             <div className="groups-list">
-              {groups.map(g => (
+              {filteredGroups.map(g => (
                 <div
                   key={g.group_id}
                   className={`group-chip-item ${activeGroupId === g.group_id ? 'active' : ''}`}
@@ -182,86 +308,110 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
                 >
                   <div className="group-info">
                     <strong>{g.name}</strong>
-                    <span>{g.item_count || 0} PRs</span>
+                    {g.description && <span className="group-desc">{g.description}</span>}
+                    <div className="group-meta-row">
+                      <span>📦 {g.item_count || 0} PRs</span>
+                      <span>🕒 {formatUpdated(g.updated_at || g.created_at)}</span>
+                    </div>
                   </div>
-                  <button
-                    onClick={e => { e.stopPropagation(); handleDeleteGroup(g.group_id); }}
-                    className="btn-icon-danger"
-                  >
-                    &times;
-                  </button>
+
+                  <div className="group-card-actions">
+                    <button
+                      onClick={e => handleOpenEditModal(g, e)}
+                      className="btn-icon-secondary"
+                      title="Edit Workspace PRs"
+                    >
+                      ✏️
+                    </button>
+                    <button
+                      onClick={e => handleDeleteGroup(g.group_id, e)}
+                      className="btn-icon-danger"
+                      title="Delete Workspace"
+                    >
+                      &times;
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           )}
         </div>
 
-        {/* Right Area: Selected Bucket Workspace */}
+        {/* Right Area: Selected Workspace Detail View */}
         <div className="staging-content">
           {activeGroup ? (
             <div className="workspace-card">
+              {/* Header with Title and Prominent Actions */}
               <div className="workspace-card-header">
                 <div>
                   <h3>Workspace: {activeGroup.name}</h3>
                   <p className="subtitle">{activeGroup.description || 'No description provided.'}</p>
                 </div>
 
-                <div className="batch-actions-bar">
+                <div className="prominent-actions-bar">
                   <button
                     onClick={handleBatchAnalyze}
                     disabled={batchAnalyzing || activeItems.length === 0}
-                    className="btn btn-primary btn-sm"
+                    className="btn btn-primary btn-action-ai"
                   >
                     {batchAnalyzing ? 'Analyzing Bucket...' : `⚡ Batch AI Review (${activeItems.length})`}
                   </button>
                   <button
                     onClick={handleBatchChangelog}
                     disabled={activeItems.length === 0}
-                    className="btn btn-secondary btn-sm"
+                    className="btn btn-secondary btn-action-changelog"
                   >
-                    📝 Draft Group Changelog
+                    📝 Create Changelog
+                  </button>
+                  <button
+                    onClick={e => handleOpenEditModal(activeGroup, e)}
+                    className="btn btn-secondary btn-action-edit"
+                  >
+                    ✏️ Edit PRs
                   </button>
                 </div>
               </div>
 
-              {/* Add PR to Group Control */}
-              <form onSubmit={handleAddPrToGroup} className="add-pr-to-group-form">
-                <label>Add PR to Bucket:</label>
-                <select
-                  value={selectedPrToAdd}
-                  onChange={e => setSelectedPrToAdd(e.target.value)}
-                  className="add-pr-select"
-                >
-                  <option value="">-- Select PR to add --</option>
-                  {prs.map(p => (
-                    <option key={p.number} value={p.number}>
-                      #{p.number}: {p.title} (@{p.author})
-                    </option>
-                  ))}
-                </select>
-                <button type="submit" className="btn btn-secondary btn-sm" disabled={!selectedPrToAdd}>
-                  + Add to Bucket
-                </button>
-              </form>
-
-              {/* Group Items Table */}
+              {/* Workspace PRs Table & Controls */}
               <div className="group-prs-table-container">
-                <h4>PRs in this Workspace ({activePrObjects.length})</h4>
-                {activePrObjects.length === 0 ? (
-                  <div className="empty-box">No PRs added to this workspace yet. Select a PR above to add!</div>
+                <div className="table-filter-bar">
+                  <h4>PRs in this Workspace ({filteredActivePrs.length})</h4>
+                  <input
+                    type="text"
+                    placeholder="Search workspace PRs..."
+                    value={prTableSearch}
+                    onChange={e => setPrTableSearch(e.target.value)}
+                    className="table-search-input"
+                  />
+                </div>
+
+                {filteredActivePrs.length === 0 ? (
+                  <div className="empty-box">
+                    {activePrObjects.length === 0
+                      ? "No PRs in this workspace yet. Click 'Edit PRs' above to add pull requests!"
+                      : `No PRs match your search filter '${prTableSearch}'.`}
+                  </div>
                 ) : (
                   <table className="staging-prs-table">
                     <thead>
                       <tr>
-                        <th>PR</th>
-                        <th>Title & Author</th>
-                        <th>Status</th>
-                        <th>Risk</th>
+                        <th className="sortable" onClick={() => handlePrSort('number')}>
+                          PR {prSortField === 'number' && (prSortAsc ? '▲' : '▼')}
+                        </th>
+                        <th className="sortable" onClick={() => handlePrSort('title')}>
+                          Title & Author {prSortField === 'title' && (prSortAsc ? '▲' : '▼')}
+                        </th>
+                        <th className="sortable" onClick={() => handlePrSort('status')}>
+                          Status {prSortField === 'status' && (prSortAsc ? '▲' : '▼')}
+                        </th>
+                        <th className="sortable" onClick={() => handlePrSort('risk')}>
+                          Risk {prSortField === 'risk' && (prSortAsc ? '▲' : '▼')}
+                        </th>
                         <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {activePrObjects.map(pr => (
+                      {filteredActivePrs.map(pr => (
                         <tr key={pr.number}>
                           <td>
                             <button onClick={() => onSelectPr(pr.number)} className="btn-link">
@@ -282,6 +432,7 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
                             <button
                               onClick={() => handleRemovePr(pr.number, pr.repo_name)}
                               className="btn-icon-danger"
+                              title="Remove from Workspace"
                             >
                               &times; Remove
                             </button>
@@ -293,7 +444,7 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
                 )}
               </div>
 
-              {/* Batch Changelog Result */}
+              {/* Batch Changelog Draft Drawer */}
               {batchChangelog && (
                 <div className="batch-changelog-output">
                   <h4>Generated Group Release Draft</h4>
@@ -305,11 +456,21 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
             </div>
           ) : (
             <div className="empty-box card-empty">
-              Select or create a Staging Bucket on the left to manage workspace PRs.
+              No Workspace selected. Click <strong>+ Add Workspace</strong> above to create a workspace!
             </div>
           )}
         </div>
       </div>
+
+      {/* Modal Component */}
+      <WorkspaceModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onSave={handleSaveWorkspace}
+        group={modalGroupTarget}
+        existingPrNumbers={modalGroupTarget ? activeItems.map(i => i.pr_number) : []}
+        allPrs={prs}
+      />
     </div>
   );
 }

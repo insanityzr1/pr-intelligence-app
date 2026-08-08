@@ -32,7 +32,10 @@ def generate_changelog(req: ChangelogRequest):
     
     pr_nums_sorted = sorted([p["number"] for p in selected_prs])
     pr_str = ", ".join([f"#{num}" for num in pr_nums_sorted])
-    title = f"Release Notes ({len(pr_nums_sorted)} PRs: {pr_str})"
+    if req.workspace_name:
+        title = f"Release Notes for '{req.workspace_name}' ({len(pr_nums_sorted)} PRs: {pr_str})"
+    else:
+        title = f"Release Notes ({len(pr_nums_sorted)} PRs: {pr_str})"
     
     # Save to SQLite DB
     saved_record = database.save_changelog(

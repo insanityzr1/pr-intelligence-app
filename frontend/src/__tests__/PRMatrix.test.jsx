@@ -51,10 +51,10 @@ describe('PRMatrix Component', () => {
   it('filters PR items when search input is typed', async () => {
     render(<PRMatrix prs={samplePRs} onSelectPr={vi.fn()} />);
 
-    const searchInput = screen.getByPlaceholderText(/Search PR ID, title, summary.../i);
+    const searchInput = screen.getByPlaceholderText(/Filter PR ID, title, summary/i);
     fireEvent.change(searchInput, { target: { value: 'Nonexistent' } });
 
-    expect(screen.getByText('No matching pull requests found.')).toBeInTheDocument();
+    expect(screen.getByText('No Pull Requests match the selected filters.')).toBeInTheDocument();
   });
 
   it('calls onSelectPr when a row is clicked', async () => {
