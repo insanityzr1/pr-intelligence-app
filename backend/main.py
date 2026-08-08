@@ -5,9 +5,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from config import settings
 from database import init_db
-from routers import prs, conflicts, changelog, export
+from routers import prs, conflicts, changelog, export, repos
 
-# Initialize DB tables
+# Initialize DB tables & defaults
 init_db()
 
 app = FastAPI(
@@ -30,8 +30,9 @@ app.include_router(prs.router)
 app.include_router(conflicts.router)
 app.include_router(changelog.router)
 app.include_router(export.router)
+app.include_router(repos.router)
 
-# Serve Frontend static build if present, otherwise fallback
+# Serve Frontend static build if present
 frontend_dist = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 
 if os.path.exists(frontend_dist):

@@ -98,7 +98,7 @@ def extract_summary(body, title):
 
 class GitHubService:
     @staticmethod
-    def fetch_prs(count: int = 40, state: str = "open", orderby: str = "updated-desc", cwd: str = None):
+    def fetch_prs(count: int = 40, state: str = "open", orderby: str = "updated-desc", repo_name: str = None, cwd: str = None):
         sort_mapping = {
             "updated-desc": "sort:updated-desc",
             "updated-asc": "sort:updated-asc",
@@ -117,6 +117,9 @@ class GitHubService:
             "--search", search_query,
             "--json", "number,title,isDraft,updatedAt,createdAt,url,labels,additions,deletions,changedFiles,mergeable,body,author,headRefName,baseRefName,headRefOid"
         ]
+
+        if repo_name:
+            cmd.extend(["--repo", repo_name])
 
         result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding="utf-8", cwd=cwd)
         prs = json.loads(result.stdout)
@@ -253,6 +256,7 @@ class GitHubService:
                 "created_at": created_at,
                 "created_fmt": created_fmt,
                 "head_sha": head_sha,
+                "repo_name": repo_name or "rpnunez/wp-ai-scheduler",
                 "labels": labels,
                 "body": body
             })
@@ -260,18 +264,22 @@ class GitHubService:
         return processed
 
     @staticmethod
-    def fetch_pr_diff(pr_number: int, cwd: str = None) -> str:
+    def fetch_pr_diff(pr_number: int, repo_name: str = None, cwd: str = None) -> str:
         try:
             cmd = ["gh", "pr", "diff", str(pr_number)]
+            if repo_name:
+                cmd.extend(["--repo", repo_name])
             result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding="utf-8", cwd=cwd)
             return result.stdout
         except Exception:
             return ""
 
     @staticmethod
-    def fetch_pr_files(pr_number: int, cwd: str = None) -> List[str]:
+    def fetch_pr_files(pr_number: int, repo_name: str = None, cwd: str = None) -> List[str]:
         try:
             cmd = ["gh", "pr", "view", str(pr_number), "--json", "files"]
+            if repo_name:
+                cmd.extend(["--repo", repo_name])
             result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding="utf-8", cwd=cwd)
             data = json.loads(result.stdout)
             return [f["path"] for f in data.get("files", [])]
