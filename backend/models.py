@@ -46,3 +46,6 @@ class RepoAddRequest(BaseModel):
 class ChatMessageRequest(BaseModel):
     message: str
     repo_name: Optional[str] = None
+
+class ChangelogRequest(BaseModel):
+    pr_numbers: List[int]
