@@ -63,6 +63,25 @@ def test_ai_review_caching():
     mismatched = database.get_cached_ai_review(pr_num, "wrong_sha")
     assert mismatched is None
 
+def test_ai_review_cache_is_scoped_per_repo():
+    """
+    The same PR number in two repositories must not share one cache row.
+    The old pr_number-only primary key let repo B overwrite repo A's review.
+    """
+    pr_num = 5
+    sha = "abc123"
+    repo_a = "acme/alpha"
+    repo_b = "acme/beta"
+
+    database.save_ai_review(pr_num, sha, {"ai_summary": "from alpha"}, repo_a)
+    database.save_ai_review(pr_num, sha, {"ai_summary": "from beta"}, repo_b)
+
+    assert database.get_cached_ai_review(pr_num, sha, repo_a)["ai_summary"] == "from alpha"
+    assert database.get_cached_ai_review(pr_num, sha, repo_b)["ai_summary"] == "from beta"
+
+    # A repo with no review for this PR gets nothing, not another repo's review.
+    assert database.get_cached_ai_review(pr_num, sha, "acme/gamma") is None
+
 def test_pr_chats_crud():
     pr_num = 303
     repo = "rpnunez/wp-ai-scheduler"

@@ -2,15 +2,17 @@ import json
 from config import settings
 from services.github_service import GitHubService
 from services.ai_service import AIService
+from services.diff_parser import DiffParser
 
 class ConflictResolutionService:
     @staticmethod
     def resolve_conflicts(pr_data: dict, diff_text: str) -> dict:
         pr_number = pr_data.get('number', 0)
-        repo_name = pr_data.get('repo_name', 'rpnunez/wp-ai-scheduler')
+        repo_name = pr_data.get('repo_name') or settings.DEFAULT_REPO
         title = pr_data.get('title', 'Conflicting PR')
         head_branch = pr_data.get('headRefName', f'branch-pr-{pr_number}')
         base_branch = pr_data.get('baseRefName', 'main')
+        diff_context = DiffParser.prepare_diff_context(diff_text, max_lines=350)
 
         prompt = f"""
 You are an expert Git Release Manager, DevOps Engineer, and AI Code Reviewer.
@@ -22,7 +24,7 @@ PR Head Branch: {head_branch}
 Target Base Branch: {base_branch}
 
 Code Diff & Context Excerpt:
-{diff_text[:3500]}
+{diff_context}
 
 Analyze the conflicting files, branch state, and code changes to build an actionable, step-by-step conflict resolution guide.
 Group commands into logical major steps (e.g., Fetching & Checkout, Rebase/Cherry-pick Initiation, Overlapping File Conflict Resolution, Verification & Force Push).

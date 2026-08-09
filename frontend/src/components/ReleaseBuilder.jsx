@@ -1,8 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { generateChangelog, fetchChangelogs, deleteChangelog, fetchGroups, fetchGroupItems, createGroup } from '../api/client';
 import FormattedMarkdown from './FormattedMarkdown';
+import { itemRefKey, prRefKey } from '../utils/prStats';
+import { useToast } from './ToastProvider';
 
 export default function ReleaseBuilder({ prs }) {
+  const toast = useToast();
   const [groups, setGroups] = useState([]);
   const [activeGroupId, setActiveGroupId] = useState(null);
   const [activeItems, setActiveItems] = useState([]);
@@ -80,7 +83,9 @@ export default function ReleaseBuilder({ prs }) {
   }
 
   const activeGroup = groups.find(g => g.group_id === activeGroupId);
-  const activePrObjects = prs ? prs.filter(p => activeItems.some(i => i.pr_number === (p.number ?? p.pr_number))) : [];
+  // Match on (repo, number) — see StagingWorkspacesTab for the same fix.
+  const activeItemKeys = new Set(activeItems.map(itemRefKey));
+  const activePrObjects = prs ? prs.filter(p => activeItemKeys.has(prRefKey(p))) : [];
 
   async function handleBuild() {
     if (activeItems.length === 0) return;
@@ -106,6 +111,15 @@ export default function ReleaseBuilder({ prs }) {
 
   async function handleDeleteChangelog(e, id) {
     e.stopPropagation();
+
+    const target = changelogs.find(c => c.id === id);
+    const confirmed = await toast.confirm({
+      title: 'Delete changelog?',
+      message: `"${target?.title || 'This changelog'}" will be permanently removed. This cannot be undone.`,
+      confirmLabel: 'Delete Changelog',
+    });
+    if (!confirmed) return;
+
     try {
       await deleteChangelog(id);
       await loadChangelogs();
@@ -113,8 +127,10 @@ export default function ReleaseBuilder({ prs }) {
         setActiveChangelogId(null);
         setCurrentChangelog(null);
       }
+      toast.success('Changelog deleted.');
     } catch (err) {
       console.error(err);
+      toast.error(`Could not delete changelog: ${err.message}`);
     }
   }
 

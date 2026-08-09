@@ -23,7 +23,7 @@ export default function FormattedMarkdown({ content }) {
       // Process bold **text**
       const boldParts = part.split(/(\*\*[^*]+\*\*)/g);
       return boldParts.map((bPart, bIndex) => {
-        if (bPart.startswith && bPart.startsWith('**') && bPart.endsWith('**') && bPart.length > 4) {
+        if (bPart.startsWith('**') && bPart.endsWith('**') && bPart.length > 4) {
           return <strong key={`${index}-${bIndex}`}>{bPart.slice(2, -2)}</strong>;
         }
         return bPart;

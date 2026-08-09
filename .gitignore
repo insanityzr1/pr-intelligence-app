@@ -18,6 +18,10 @@ build/
 .env.local
 *.log
 
+# Bare mirror clones used by the git merge engine. These are caches — they can
+# be large and are rebuilt on demand.
+.git-mirrors/
+
 # IDE
 .idea/
 .vscode/

@@ -1,15 +1,29 @@
 import argparse
+import asyncio
+import logging
 import os
 import sys
-from fastapi import FastAPI
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from config import settings
 from database import init_db
-from routers import prs, conflicts, changelog, export, repos, tags
+from routers import (
+    prs, conflicts, changelog, export, repos, tags, build,
+    events, jobs, writeback, dependencies,
+)
+from services.auth_service import auth_enabled, require_api_key
+from services.job_service import JobService
+from services.sync_service import SyncService
+
+logger = logging.getLogger(__name__)
 
 def parse_cli_args():
+    """Build the CLI parser. Returns the parser, not parsed args — callers decide
+    between parse_args() and parse_known_args()."""
     parser = argparse.ArgumentParser(description="PR Intelligence FastAPI Server")
     parser.add_argument("--host", type=str, help="Host address to bind to (e.g. 0.0.0.0)")
     parser.add_argument("--port", type=int, help="Port to bind server to (e.g. 8000)")
@@ -22,30 +36,86 @@ def parse_cli_args():
     
     # Attempted protected field overrides (will trigger security warnings)
     parser.add_argument("--app-env", type=str, help="Attempt override of protected APP_ENV field")
-    
-    return parser.parse_args()
 
-# Parse CLI args if running via python backend/main.py
-if __name__ == "__main__":
-    args = parse_cli_args()
-    cli_dict = vars(args)
-    settings.apply_cli_overrides(cli_dict)
+    return parser
+
+# Apply CLI overrides at import time, not only under __main__. Uvicorn imports
+# this module as `main:app`, so gating on __main__ meant `uvicorn main:app
+# --port 9000` silently ignored every flag. argparse is skipped when the process
+# was not launched with our own flags (e.g. pytest, `uvicorn` with its own argv).
+KNOWN_CLI_FLAGS = (
+    "--host", "--port", "--reload", "--debug", "--ai-provider",
+    "--pr-fetch-limit", "--db-path", "--log-level", "--app-env",
+)
+
+
+def _maybe_apply_cli_overrides():
+    argv = sys.argv[1:]
+    if not any(a.split("=")[0] in KNOWN_CLI_FLAGS for a in argv):
+        return
+    # parse_known_args so foreign flags (uvicorn's, pytest's) never abort startup.
+    args, _unknown = parse_cli_args().parse_known_args()
+    settings.apply_cli_overrides(vars(args))
+
+
+_maybe_apply_cli_overrides()
+
+logging.basicConfig(
+    level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
+    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+)
 
 # Initialize DB tables & defaults
 init_db()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Start and stop background work with the app.
+
+    There was no startup/shutdown hook at all before: the background sync loop
+    and the AI job queue both need somewhere to be owned and, importantly,
+    cancelled — otherwise a reload leaks tasks.
+    """
+    settings.validate_security()
+    stop_event = asyncio.Event()
+    sync_task = asyncio.create_task(SyncService.run_periodic(stop_event))
+    logger.info(
+        "Started [%s]. Background sync: %s. Auth: %s.",
+        settings.APP_ENV,
+        f"every {settings.SYNC_INTERVAL_SECONDS}s" if settings.SYNC_INTERVAL_SECONDS > 0 else "disabled",
+        "enabled" if auth_enabled() else "disabled (open)",
+    )
+    try:
+        yield
+    finally:
+        stop_event.set()
+        sync_task.cancel()
+        await asyncio.gather(sync_task, return_exceptions=True)
+        await JobService.shutdown()
+        logger.info("Shutdown complete.")
+
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
     debug=settings.DEBUG,
-    description="FastAPI + React AI-Powered PR Intelligence Application"
+    description="FastAPI + React AI-Powered PR Intelligence Application",
+    lifespan=lifespan,
+    dependencies=[Depends(require_api_key)],
 )
 
-# CORS
+# CORS.
+# `allow_origins=["*"]` together with `allow_credentials=True` is an invalid
+# combination that browsers reject outright, so the previous config gave neither
+# wildcard access nor credentialed access. Credentials are not used by this app
+# (there is no auth yet), so the wildcard is kept and credentials turned off.
+# Set CORS_ALLOW_ORIGINS to an explicit comma-separated list to lock this down.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=settings.CORS_ALLOW_ORIGINS,
+    allow_credentials=settings.CORS_ALLOW_ORIGINS != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -57,6 +127,11 @@ app.include_router(changelog.router)
 app.include_router(export.router)
 app.include_router(repos.router)
 app.include_router(tags.router)
+app.include_router(build.router)
+app.include_router(events.router)
+app.include_router(jobs.router)
+app.include_router(writeback.router)
+app.include_router(dependencies.router)
 
 # Serve Frontend static build if present
 frontend_dist = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
@@ -64,8 +139,25 @@ frontend_dist = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"
 if os.path.exists(frontend_dist):
     app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="assets")
 
-@app.get("/")
-def read_root():
+@app.get("/health", tags=["Ops"])
+def health():
+    """Liveness probe. Cheap and dependency-free by design."""
+    return {"status": "ok"}
+
+
+@app.get("/api/version", tags=["Ops"])
+def version():
+    return {
+        "app": settings.PROJECT_NAME,
+        "version": settings.VERSION,
+        "app_env": settings.APP_ENV,
+        "ai_provider": settings.AI_PROVIDER,
+        "default_repo": settings.DEFAULT_REPO,
+        "auth_required": auth_enabled(),
+    }
+
+
+def _index_response():
     index_path = os.path.join(frontend_dist, "index.html")
     if os.path.exists(index_path):
         return FileResponse(index_path)
@@ -77,6 +169,21 @@ def read_root():
         "docs": "/docs",
         "frontend": "Run Vite dev server or build frontend"
     }
+
+
+@app.get("/")
+def read_root():
+    return _index_response()
+
+
+# SPA catch-all. Registered last so it never shadows a real route: any
+# non-/api path falls through to index.html and lets the client router take
+# over. Without this, deep links 404 against the production build.
+@app.get("/{full_path:path}", include_in_schema=False)
+def spa_fallback(full_path: str):
+    if full_path.startswith("api/") or full_path in ("docs", "redoc", "openapi.json", "health"):
+        raise HTTPException(status_code=404, detail="Not found")
+    return _index_response()
 
 if __name__ == "__main__":
     import uvicorn

@@ -21,10 +21,57 @@ An enterprise-grade **AI-powered Pull Request Triage, Analysis, Code Review, Con
 - **Saved Changelogs Sidebar**: All generated release notes are stored in SQLite (`changelogs` table) with PR numbers, branch metadata, and timestamps.
 - **1-Click Loading**: Load, view, copy, or delete historical changelogs instantly in a condensed 3-column layout.
 
+### 🏗️ Real Merge Engine & Build Simulation
+Backed by an actual `git merge-tree --write-tree` against a bare mirror clone — not GitHub's
+per-PR `mergeable` flag, which only answers *"does this PR merge into main?"*.
+
+- **PR-to-PR Conflict Detection**: Merges a workspace's PRs *together* and reports which one
+  breaks the accumulated build. Two PRs can each merge cleanly into `main` and still collide.
+- **Pairwise Conflict Matrix**: Names which two PRs conflict, and on which files.
+- **Suggested Merge Order**: Least-entangled first, so most of the set can land before the
+  tangled remainder is resolved.
+- **Genuinely Appliable Patches**: Produced by `git diff` against the merged tree; they pass
+  `git apply --check`.
+- Requires **git ≥ 2.38**. Set `GIT_MERGE_ENABLED=false` for offline runs; the app then falls
+  back to the file-overlap heuristic and says so in the UI.
+
+### 📡 Live Updates, Webhooks & Async AI Jobs
+- **GitHub Webhooks**: HMAC-verified `POST /api/webhooks/github` for `pull_request`,
+  `check_suite`, `push`, and review events. Set `GITHUB_WEBHOOK_SECRET` before exposing it.
+- **Server-Sent Events**: `GET /api/events` pushes PR updates and job progress to the UI.
+  A live/offline dot in the header distinguishes "nothing changed" from "the stream is down".
+- **Background Reconciliation**: optional `SYNC_INTERVAL_SECONDS` loop catches missed
+  deliveries.
+- **Async AI Jobs**: batch review is queued (`POST /api/jobs/analyze`) and returns
+  immediately, with live progress, per-PR errors, and cooperative cancellation — instead of
+  one opaque multi-minute request a browser timeout could discard.
+
+### ↩️ Write-Back to GitHub
+- **Post AI Reviews** as PR comments, and **sync app tags to GitHub labels**.
+- **Merge a Workspace in Order** using the simulation's computed sequence.
+  **Dry run by default** — it aborts at the first failure, since every later merge would
+  target a base the simulation never modelled.
+
+### 🧬 Stacked-PR Dependency Graph
+- Detects PRs branched off other PRs via **explicit base branch** and **commit ancestry**
+  (the latter survives a retarget onto `main`).
+- Produces a genuinely **topological** merge order — unlike the build simulation's
+  degree-based ordering, a stack edge is directed.
+- **Filters stack false positives** out of the Collision Matrix: a stacked PR necessarily
+  touches its parent's files, which was the largest source of noise there.
+
+### 🚦 Release-Readiness Gate
+- **CI & Review Ingestion**: `statusCheckRollup` and `reviewDecision` per PR, shown as badges
+  in the matrix and workspace tables.
+- **Ship Blockers in One Verdict**: Failing CI (naming the checks), changes requested,
+  awaiting approval, still-draft, and PRs that fail the merge simulation. Pending CI is a
+  warning rather than a blocker, since it may still go green.
+
 ### ⚔️ Actionable Conflict Resolver & Bash Script Generator
+- **Real Conflict Markers**: The AI resolver reasons over the actual conflicted text from the
+  merged tree, not a truncated slice of the PR diff.
 - **Categorized Step Groups**: Structural step-by-step conflict resolution guide (Fetch & Sync, Rebase/Cherry-pick, Conflict Staging, Verification).
 - **1-Click Bash Script Download**: Download executable `.sh` shell scripts pre-filled with git commands to resolve conflicts locally in one terminal run.
-- **Patch Preview**: Download generated `.patch` files or preview 3-way resolved code logic.
 
 ### 🔍 Centered Extra-Wide PR Workspace Modal & AI Chat
 - **Centered 1240px Extra-Wide Modal**: Maximized view for code inspection and overview data.
@@ -96,7 +143,17 @@ AI_PROVIDER=gemini
 DEFAULT_REPO=rpnunez/wp-ai-scheduler
 PR_FETCH_LIMIT=100
 DB_PATH=pr_intelligence.db
+
+# Git merge engine (requires git >= 2.38)
+# Optional: falls back to `gh auth token` when unset.
+GITHUB_TOKEN=
+GIT_MIRROR_DIR=.git-mirrors
+GIT_MERGE_ENABLED=true
 ```
+
+> **Prerequisites:** the GitHub CLI (`gh`) authenticated via `gh auth login`, and
+> **git ≥ 2.38** for the merge engine. Check with `GET /api/build/status`, which reports
+> whether real merge simulation is available and why not if it isn't.
 
 ---
 
@@ -157,8 +214,18 @@ pr-intelligence-app/
 │   ├── config.py                # Environment & CLI Configuration Loader
 │   ├── database.py              # SQLite Schema & Operations Manager
 │   ├── models.py                # Pydantic Schemas
-│   ├── routers/                 # API Endpoint Routers (prs, conflicts, changelog, tags, export, repos)
-│   ├── services/                # Business Logic Services (AIService, ConflictResolution, GitHubService, etc.)
+│   ├── routers/                 # API Routers (prs, conflicts, changelog, tags, export, repos,
+│   │                            #   build, events, jobs, writeback, dependencies)
+│   ├── services/                # Business Logic Services
+│   │   ├── git_service.py       #   Real merges via `git merge-tree` on a bare mirror clone
+│   │   ├── build_service.py     #   Workspace build simulation & release-readiness gate
+│   │   ├── dependency_service.py#   Stacked-PR detection & topological merge order
+│   │   ├── sync_service.py      #   Background + webhook-driven PR synchronization
+│   │   ├── job_service.py       #   Async AI job queue with progress & cancellation
+│   │   ├── writeback_service.py #   Comments, labels, and ordered merges back to GitHub
+│   │   ├── event_bus.py         #   In-process pub/sub backing the SSE stream
+│   │   ├── auth_service.py      #   Optional shared-secret API key
+│   │   └── ...                  #   AIService, ConflictResolution, GitHubService, DiffParser
 │   └── tests/                   # Pytest Test Suite (test_database, test_services, test_routers)
 ├── frontend/
 │   ├── src/

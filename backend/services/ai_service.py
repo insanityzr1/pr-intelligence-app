@@ -1,6 +1,11 @@
 import json
+import logging
 import requests
 from config import settings
+from services.diff_parser import DiffParser
+
+logger = logging.getLogger(__name__)
+
 
 class AIService:
     @staticmethod
@@ -10,7 +15,12 @@ class AIService:
         title = pr_data.get('title', '')
         author = pr_data.get('author', '')
         pr_type = pr_data.get('type', 'Enhancement')
-        
+
+        # Chunk rather than hard-slice. A raw diff_text[:4000] routinely cut mid-hunk
+        # and dropped every file after the first, so large PRs were reviewed on a
+        # fragment without the model being told anything was missing.
+        diff_context = DiffParser.prepare_diff_context(diff_text)
+
         prompt = f"""
 You are an expert Senior Code Reviewer and Lead Architect.
 Analyze PR #{pr_number} in repo `{repo_name}`.
@@ -20,7 +30,7 @@ Author: @{author}
 Type: {pr_type}
 
 Diff Excerpt:
-{diff_text[:4000]}
+{diff_context}
 
 Respond ONLY with a valid JSON object matching this structure:
 {{
@@ -37,14 +47,37 @@ Respond ONLY with a valid JSON object matching this structure:
 }}
 """
 
-        if settings.GEMINI_API_KEY and (settings.AI_PROVIDER in ["auto", "gemini"]):
-            return AIService._call_gemini(prompt)
-        elif settings.OPENAI_API_KEY and (settings.AI_PROVIDER in ["auto", "openai"]):
-            return AIService._call_openai(prompt)
-        elif settings.ANTHROPIC_API_KEY and (settings.AI_PROVIDER in ["auto", "anthropic"]):
-            return AIService._call_anthropic(prompt)
+        for call in AIService._available_providers():
+            return call(prompt)
+        return AIService._heuristic_fallback(pr_data)
+
+    # Ollama needs no API key, so "configured" cannot gate it. Requiring it to be
+    # named explicitly keeps `auto` with no keys going straight to heuristics
+    # rather than waiting on a localhost connection that probably is not there.
+    @staticmethod
+    def _provider_candidates(json_mode: bool):
+        if json_mode:
+            calls = (AIService._call_gemini, AIService._call_openai, AIService._call_anthropic,
+                     AIService._call_deepseek, AIService._call_ollama)
         else:
-            return AIService._heuristic_fallback(pr_data)
+            calls = (AIService._text_gemini, AIService._text_openai, AIService._text_anthropic,
+                     AIService._text_deepseek, AIService._text_ollama)
+
+        gemini, openai, anthropic, deepseek, ollama = calls
+        provider = settings.AI_PROVIDER
+        candidates = [
+            ("gemini", bool(settings.GEMINI_API_KEY), gemini),
+            ("openai", bool(settings.OPENAI_API_KEY), openai),
+            ("anthropic", bool(settings.ANTHROPIC_API_KEY), anthropic),
+            ("deepseek", bool(settings.DEEPSEEK_API_KEY), deepseek),
+            ("ollama", provider == "ollama", ollama),
+        ]
+        return [(name, call) for name, usable, call in candidates
+                if usable and provider in ("auto", name)]
+
+    @staticmethod
+    def _available_providers():
+        return [call for _name, call in AIService._provider_candidates(json_mode=True)]
 
     @staticmethod
     def chat_response(pr_data: dict, diff_text: str, user_msg: str) -> str:
@@ -57,6 +90,7 @@ Respond ONLY with a valid JSON object matching this structure:
         title = pr_data.get('title', 'PR')
         author = pr_data.get('author', 'unknown')
         summary = pr_data.get('summary', '')
+        diff_context = DiffParser.prepare_diff_context(diff_text, max_lines=350)
 
         prompt = f"""
 You are an expert AI Pair Programmer assisting a developer with Pull Request #{pr_number} in `{repo_name}`.
@@ -67,7 +101,7 @@ PR Details:
 - Summary: {summary}
 
 Code Diff Excerpt:
-{diff_text[:3500]}
+{diff_context}
 
 User Question:
 {user_msg}
@@ -75,47 +109,16 @@ User Question:
 Instructions:
 Answer the user's question directly, accurately, and professionally. If the user asks what changed, detail the specific diff modifications. If they ask for tests or code refactors, provide clean markdown code blocks.
 """
-        # 1. Try Gemini
-        if settings.GEMINI_API_KEY and settings.AI_PROVIDER in ["auto", "gemini"]:
+        # Try each configured provider in order, falling through on failure.
+        for name, call in AIService._available_text_providers():
             try:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={settings.GEMINI_API_KEY}"
-                payload = {"contents": [{"parts": [{"text": prompt}]}]}
-                resp = requests.post(url, json=payload, timeout=30)
-                res_json = resp.json()
-                if 'candidates' in res_json and res_json['candidates']:
-                    return res_json['candidates'][0]['content']['parts'][0]['text'].strip()
-                elif 'error' in res_json:
-                    print(f"Gemini API Error: {res_json['error'].get('message')}")
+                text = call(prompt)
+                if text:
+                    return text
             except Exception as e:
-                print(f"Gemini Chat error: {e}")
+                logger.error("%s chat call failed: %s", name, e)
 
-        # 2. Try OpenAI
-        if settings.OPENAI_API_KEY and settings.AI_PROVIDER in ["auto", "openai"]:
-            try:
-                url = "https://api.openai.com/v1/chat/completions"
-                headers = {"Authorization": f"Bearer {settings.OPENAI_API_KEY}", "Content-Type": "application/json"}
-                payload = {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": prompt}], "temperature": 0.3}
-                resp = requests.post(url, json=payload, headers=headers, timeout=30)
-                res_json = resp.json()
-                if 'choices' in res_json and res_json['choices']:
-                    return res_json['choices'][0]['message']['content'].strip()
-            except Exception as e:
-                print(f"OpenAI Chat error: {e}")
-
-        # 3. Try Anthropic
-        if settings.ANTHROPIC_API_KEY and settings.AI_PROVIDER in ["auto", "anthropic"]:
-            try:
-                url = "https://api.anthropic.com/v1/messages"
-                headers = {"x-api-key": settings.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
-                payload = {"model": "claude-3-5-sonnet-20240620", "max_tokens": 1000, "messages": [{"role": "user", "content": prompt}]}
-                resp = requests.post(url, json=payload, headers=headers, timeout=30)
-                res_json = resp.json()
-                if 'content' in res_json and res_json['content']:
-                    return res_json['content'][0]['text'].strip()
-            except Exception as e:
-                print(f"Anthropic Chat error: {e}")
-
-        # 4. Rich Dynamic Fallback Analyzer
+        # Rich Dynamic Fallback Analyzer
         msg_lower = user_msg.lower()
         
         if "conflict" in msg_lower or "rebase" in msg_lower or "merge" in msg_lower:
@@ -134,6 +137,88 @@ Answer the user's question directly, accurately, and professionally. If the user
             return f"### PR #{pr_number} Assistant Response\n\nI have analyzed **PR #{pr_number} ({title})** by @{author}.\n\n- **Query**: {user_msg}\n- **Recommendation**: Review modified files to ensure strict adherence to repository coding standards and test coverage guidelines. If you'd like custom code snippets or rebase commands, please specify!"
 
     @staticmethod
+    def _strip_json_fences(text: str) -> str:
+        return text.replace("```json", "").replace("```", "").strip()
+
+    # --- Freeform text completions (chat) ---------------------------------
+    # These mirror the JSON calls above but return prose. They previously lived
+    # inline in chat_response with the models hardcoded a second time.
+
+    @staticmethod
+    def _text_gemini(prompt: str) -> str:
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{settings.GEMINI_MODEL}:generateContent?key={settings.GEMINI_API_KEY}"
+        )
+        resp = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=settings.AI_TIMEOUT)
+        res_json = resp.json()
+        if res_json.get("candidates"):
+            return res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
+        if "error" in res_json:
+            logger.error("Gemini API error: %s", res_json["error"].get("message"))
+        return ""
+
+    @staticmethod
+    def _text_openai(prompt: str) -> str:
+        resp = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {settings.OPENAI_API_KEY}", "Content-Type": "application/json"},
+            json={"model": settings.OPENAI_MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": 0.3},
+            timeout=settings.AI_TIMEOUT,
+        )
+        res_json = resp.json()
+        if res_json.get("choices"):
+            return res_json["choices"][0]["message"]["content"].strip()
+        return ""
+
+    @staticmethod
+    def _text_anthropic(prompt: str) -> str:
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": settings.ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": settings.ANTHROPIC_MODEL,
+                "max_tokens": 1000,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=settings.AI_TIMEOUT,
+        )
+        res_json = resp.json()
+        if res_json.get("content"):
+            return res_json["content"][0]["text"].strip()
+        return ""
+
+    @staticmethod
+    def _text_deepseek(prompt: str) -> str:
+        resp = requests.post(
+            "https://api.deepseek.com/chat/completions",
+            headers={"Authorization": f"Bearer {settings.DEEPSEEK_API_KEY}", "Content-Type": "application/json"},
+            json={"model": settings.DEEPSEEK_MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": 0.3},
+            timeout=settings.AI_TIMEOUT,
+        )
+        res_json = resp.json()
+        if res_json.get("choices"):
+            return res_json["choices"][0]["message"]["content"].strip()
+        return ""
+
+    @staticmethod
+    def _text_ollama(prompt: str) -> str:
+        resp = requests.post(
+            f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/generate",
+            json={"model": settings.OLLAMA_MODEL, "prompt": prompt, "stream": False},
+            timeout=settings.AI_TIMEOUT,
+        )
+        return (resp.json().get("response") or "").strip()
+
+    @staticmethod
+    def _available_text_providers():
+        return AIService._provider_candidates(json_mode=False)
+
+    @staticmethod
     def _call_openai(prompt: str) -> dict:
         try:
             url = "https://api.openai.com/v1/chat/completions"
@@ -142,33 +227,35 @@ Answer the user's question directly, accurately, and professionally. If the user
                 "Content-Type": "application/json"
             }
             payload = {
-                "model": "gpt-4o-mini",
+                "model": settings.OPENAI_MODEL,
                 "messages": [{"role": "user", "content": prompt}],
                 "response_format": {"type": "json_object"},
                 "temperature": 0.2
             }
-            resp = requests.post(url, json=payload, headers=headers, timeout=30)
+            resp = requests.post(url, json=payload, headers=headers, timeout=settings.AI_TIMEOUT)
             res_json = resp.json()
             content = res_json['choices'][0]['message']['content']
             return json.loads(content)
         except Exception as e:
-            print(f"OpenAI API call failed: {e}")
+            logger.error("OpenAI API call failed: %s", e)
             return AIService._heuristic_fallback({})
 
     @staticmethod
     def _call_gemini(prompt: str) -> dict:
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={settings.GEMINI_API_KEY}"
+            url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{settings.GEMINI_MODEL}:generateContent?key={settings.GEMINI_API_KEY}"
+            )
             payload = {
                 "contents": [{"parts": [{"text": prompt + "\nProvide JSON response only."}]}]
             }
-            resp = requests.post(url, json=payload, timeout=30)
+            resp = requests.post(url, json=payload, timeout=settings.AI_TIMEOUT)
             res_json = resp.json()
             text = res_json['candidates'][0]['content']['parts'][0]['text']
-            clean_text = text.replace("```json", "").replace("```", "").strip()
-            return json.loads(clean_text)
+            return json.loads(AIService._strip_json_fences(text))
         except Exception as e:
-            print(f"Gemini API call failed: {e}")
+            logger.error("Gemini API call failed: %s", e)
             return AIService._heuristic_fallback({})
 
     @staticmethod
@@ -181,17 +268,57 @@ Answer the user's question directly, accurately, and professionally. If the user
                 "Content-Type": "application/json"
             }
             payload = {
-                "model": "claude-3-5-sonnet-20240620",
+                "model": settings.ANTHROPIC_MODEL,
                 "max_tokens": 1000,
                 "messages": [{"role": "user", "content": prompt}]
             }
-            resp = requests.post(url, json=payload, headers=headers, timeout=30)
+            resp = requests.post(url, json=payload, headers=headers, timeout=settings.AI_TIMEOUT)
             res_json = resp.json()
             text = res_json['content'][0]['text']
-            clean_text = text.replace("```json", "").replace("```", "").strip()
-            return json.loads(clean_text)
+            return json.loads(AIService._strip_json_fences(text))
         except Exception as e:
-            print(f"Anthropic API call failed: {e}")
+            logger.error("Anthropic API call failed: %s", e)
+            return AIService._heuristic_fallback({})
+
+    @staticmethod
+    def _call_deepseek(prompt: str) -> dict:
+        """DEEPSEEK_API_KEY was read from config but no code path ever used it."""
+        try:
+            url = "https://api.deepseek.com/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {settings.DEEPSEEK_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "model": settings.DEEPSEEK_MODEL,
+                "messages": [{"role": "user", "content": prompt}],
+                "response_format": {"type": "json_object"},
+                "temperature": 0.2
+            }
+            resp = requests.post(url, json=payload, headers=headers, timeout=settings.AI_TIMEOUT)
+            res_json = resp.json()
+            content = res_json['choices'][0]['message']['content']
+            return json.loads(AIService._strip_json_fences(content))
+        except Exception as e:
+            logger.error("DeepSeek API call failed: %s", e)
+            return AIService._heuristic_fallback({})
+
+    @staticmethod
+    def _call_ollama(prompt: str) -> dict:
+        """Ollama was advertised in --help and the .env comments but never implemented."""
+        try:
+            url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/generate"
+            payload = {
+                "model": settings.OLLAMA_MODEL,
+                "prompt": prompt + "\nRespond with JSON only.",
+                "format": "json",
+                "stream": False,
+            }
+            resp = requests.post(url, json=payload, timeout=settings.AI_TIMEOUT)
+            res_json = resp.json()
+            return json.loads(AIService._strip_json_fences(res_json.get("response", "")))
+        except Exception as e:
+            logger.error("Ollama API call failed: %s", e)
             return AIService._heuristic_fallback({})
 
     @staticmethod

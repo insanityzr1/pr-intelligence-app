@@ -64,6 +64,8 @@ describe('PRMatrix Component', () => {
     const prRow = screen.getByText('Refactor admin template rendering').closest('tr');
     fireEvent.click(prRow);
 
-    expect(onSelectMock).toHaveBeenCalledWith(1874);
+    // The row now passes the PR's own repository alongside the number, so the
+    // detail drawer keeps its repo context in multi-repo mode.
+    expect(onSelectMock).toHaveBeenCalledWith(1874, 'rpnunez/wp-ai-scheduler');
   });
 });

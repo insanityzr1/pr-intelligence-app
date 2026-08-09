@@ -1,4 +1,5 @@
 import React from 'react';
+import { computePrStats } from '../utils/prStats';
 
 export default function TopHeader({
   activeTab,
@@ -6,7 +7,8 @@ export default function TopHeader({
   prs = [],
   onMobileMenuToggle,
   searchQuery,
-  setSearchQuery
+  setSearchQuery,
+  liveConnected = false
 }) {
   const getTabDetails = (tab) => {
     switch (tab) {
@@ -25,11 +27,14 @@ export default function TopHeader({
 
   const details = getTabDetails(activeTab);
 
-  // Compute inline KPI stats
-  const totalCount = prs.length;
-  const conflictCount = prs.filter(p => (p.conflicts_count || p.has_conflicts || p.conflicting_files?.length > 0)).length;
-  const highRiskCount = prs.filter(p => p.risk_level === 'HIGH' || p.risk_level === 'CRITICAL').length;
-  const readyCount = prs.filter(p => p.risk_level === 'LOW' && (!p.conflicts_count || p.conflicts_count === 0)).length;
+  // Compute inline KPI stats from the canonical selectors so these chips can never
+  // drift from the ones rendered by PRCommandBar.
+  const {
+    total: totalCount,
+    conflicts: conflictCount,
+    highRisk: highRiskCount,
+    clean: readyCount,
+  } = computePrStats(prs);
 
   return (
     <header className="top-header">
@@ -82,6 +87,16 @@ export default function TopHeader({
       </div>
 
       <div className="top-header-right">
+        {/* Whether the app is receiving live updates, so "nothing changed" is
+            distinguishable from "the stream is down". */}
+        <span
+          className={`live-dot ${liveConnected ? 'live' : 'offline'}`}
+          title={liveConnected ? 'Live updates connected' : 'Live updates disconnected — data may be stale'}
+        >
+          <span aria-hidden="true">●</span>
+          <span className="sr-only">{liveConnected ? 'Live' : 'Offline'}</span>
+        </span>
+
         <div className="top-kpi-group">
           <div className="kpi-chip kpi-total" title="Total Pull Requests">
             <span className="kpi-label">PRs</span>

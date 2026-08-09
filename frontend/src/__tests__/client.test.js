@@ -38,7 +38,9 @@ describe('API Client Library', () => {
     });
 
     const result = await fetchPRs();
-    expect(global.fetch).toHaveBeenCalledWith('/api/prs');
+    expect(global.fetch).toHaveBeenCalledWith('/api/prs', expect.objectContaining({
+      headers: expect.objectContaining({ 'X-API-Key': 'dev-secret-key' })
+    }));
     expect(result).toEqual(mockData);
   });
 
@@ -64,7 +66,9 @@ describe('API Client Library', () => {
     });
 
     const result = await fetchPRDetail(1874, 'test/repo');
-    expect(global.fetch).toHaveBeenCalledWith('/api/prs/1874?repo_name=test%2Frepo');
+    expect(global.fetch).toHaveBeenCalledWith('/api/prs/1874?repo_name=test%2Frepo', expect.objectContaining({
+      headers: expect.objectContaining({ 'X-API-Key': 'dev-secret-key' })
+    }));
     expect(result).toEqual(mockPr);
   });
 
@@ -91,7 +95,9 @@ describe('API Client Library', () => {
     });
 
     const result = await fetchChangelogs();
-    expect(global.fetch).toHaveBeenCalledWith('/api/changelog');
+    expect(global.fetch).toHaveBeenCalledWith('/api/changelog', expect.objectContaining({
+      headers: expect.objectContaining({ 'X-API-Key': 'dev-secret-key' })
+    }));
     expect(result).toEqual(mockLogs);
   });
 

@@ -1,9 +1,16 @@
 from datetime import datetime, timezone
 import json
+import logging
 import re
 import subprocess
 import sys
 from config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class GitHubServiceError(RuntimeError):
+    """Raised when a `gh` invocation fails. Callers should surface this, not mask it."""
 
 def format_relative_time(iso_str):
     if not iso_str:
@@ -65,6 +72,59 @@ def extract_summary(body, title):
             return line[:140] + ('...' if len(line) > 140 else '')
     return lines[0][:140] if lines else f"PR addressing {title.lower()}."
 
+def summarize_checks(rollup) -> dict:
+    """
+    Collapse `statusCheckRollup` into pass/fail/pending counts.
+
+    The rollup mixes two node shapes: CheckRun entries carry `status` +
+    `conclusion`, while legacy StatusContext entries carry `state`. Treating
+    either one alone silently loses half the signal on repos that use both.
+    """
+    passed = failed = pending = 0
+    failed_names = []
+
+    for node in rollup or []:
+        if not isinstance(node, dict):
+            continue
+        name = node.get("name") or node.get("context") or "check"
+
+        if node.get("status") is not None or node.get("conclusion") is not None:
+            status = (node.get("status") or "").upper()
+            conclusion = (node.get("conclusion") or "").upper()
+            if status and status != "COMPLETED":
+                pending += 1
+            elif conclusion in ("SUCCESS", "NEUTRAL", "SKIPPED"):
+                passed += 1
+            elif conclusion:
+                failed += 1
+                failed_names.append(name)
+            else:
+                pending += 1
+        else:
+            state = (node.get("state") or "").upper()
+            if state == "SUCCESS":
+                passed += 1
+            elif state in ("FAILURE", "ERROR"):
+                failed += 1
+                failed_names.append(name)
+            elif state:
+                pending += 1
+
+    if failed:
+        state = "FAILING"
+    elif pending:
+        state = "PENDING"
+    elif passed:
+        state = "PASSING"
+    else:
+        state = "NONE"
+
+    return {
+        "state": state, "passed": passed, "failed": failed,
+        "pending": pending, "failed_names": failed_names,
+    }
+
+
 class GitHubService:
     @staticmethod
     def fetch_prs(count=100, state="open", orderby="updated-desc", repo_name=None, cwd=None):
@@ -73,13 +133,36 @@ class GitHubService:
             "gh", "pr", "list",
             "--limit", str(fetch_limit),
             "--state", state,
-            "--json", "number,title,author,url,updatedAt,createdAt,isDraft,mergeable,labels,body,headRefName,baseRefName,additions,deletions,changedFiles,headRefOid"
+            # statusCheckRollup / reviewDecision / reviews were never requested,
+            # so the app was blind to CI results and approvals — the two things
+            # that actually gate a release.
+            "--json", "number,title,author,url,updatedAt,createdAt,isDraft,mergeable,labels,body,"
+                      "headRefName,baseRefName,additions,deletions,changedFiles,headRefOid,"
+                      "statusCheckRollup,reviewDecision,reviewRequests,assignees"
         ]
         if repo_name:
             cmd.extend(["--repo", repo_name])
 
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding="utf-8", cwd=cwd)
-        raw_prs = json.loads(result.stdout)
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, check=True, encoding="utf-8", cwd=cwd
+            )
+            raw_prs = json.loads(result.stdout)
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or "").strip()
+            logger.error("gh pr list failed for %s: %s", repo_name or "<default repo>", stderr)
+            raise GitHubServiceError(
+                f"Could not list PRs for {repo_name or 'the default repository'}"
+                + (f": {stderr}" if stderr else "")
+            ) from exc
+        except FileNotFoundError as exc:
+            logger.error("The `gh` CLI was not found on PATH.")
+            raise GitHubServiceError(
+                "The GitHub CLI (`gh`) is not installed or not on PATH."
+            ) from exc
+        except json.JSONDecodeError as exc:
+            logger.error("Unparseable JSON from gh pr list: %s", exc)
+            raise GitHubServiceError("Malformed response from GitHub while listing PRs.") from exc
 
         processed = []
         for pr in raw_prs:
@@ -157,6 +240,9 @@ class GitHubService:
                 risk_detail = "Small Change"
                 risk_score = 1
 
+            checks = summarize_checks(pr.get("statusCheckRollup"))
+            review_decision = pr.get("reviewDecision") or ""
+
             target_repo = repo_name if repo_name else settings.DEFAULT_REPO
 
             processed.append({
@@ -187,29 +273,115 @@ class GitHubService:
                 "labels": labels,
                 "body": body,
                 "headRefName": pr.get("headRefName", ""),
-                "baseRefName": pr.get("baseRefName", "main")
+                "baseRefName": pr.get("baseRefName", "main"),
+                "checks_state": checks["state"],
+                "checks_passed": checks["passed"],
+                "checks_failed": checks["failed"],
+                "checks_pending": checks["pending"],
+                "failed_checks": checks["failed_names"],
+                "review_decision": review_decision,
+                "reviewers": [
+                    r.get("login") or (r.get("name") or "")
+                    for r in (pr.get("reviewRequests") or []) if isinstance(r, dict)
+                ],
             })
 
-        return processed
+        return GitHubService._apply_ordering(processed, orderby)
+
+    # `gh pr list` has no --orderby flag, so the parameter used to be accepted
+    # and silently dropped. Sorting the processed rows honors the contract
+    # without depending on gh's search-qualifier syntax.
+    ORDER_FIELDS = {
+        "updated": "updated_at",
+        "created": "created_at",
+        "number": "number",
+        "risk": "risk_score",
+    }
+
+    @staticmethod
+    def _apply_ordering(rows: list, orderby: str) -> list:
+        if not orderby:
+            return rows
+
+        field_name, _, direction = orderby.partition("-")
+        key = GitHubService.ORDER_FIELDS.get(field_name)
+        if not key:
+            logger.warning("Unknown orderby '%s'; leaving GitHub's default order.", orderby)
+            return rows
+
+        reverse = direction != "asc"
+        return sorted(rows, key=lambda p: (p.get(key) is None, p.get(key)), reverse=reverse)
 
     @staticmethod
     def fetch_pr_diff(pr_number: int, repo_name: str = None, cwd: str = None) -> str:
+        """
+        Return the raw unified diff for a PR.
+
+        Raises on failure. This used to swallow every exception and return a
+        fabricated diff ("-old code / +new code"), which was then fed to the LLM
+        and to the conflict resolver — producing confident, entirely fictional
+        reviews with no error surfaced anywhere.
+        """
+        cmd = ["gh", "pr", "diff", str(pr_number)]
+        if repo_name:
+            cmd.extend(["--repo", repo_name])
         try:
-            cmd = ["gh", "pr", "diff", str(pr_number)]
-            if repo_name:
-                cmd.extend(["--repo", repo_name])
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding="utf-8", cwd=cwd)
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, check=True, encoding="utf-8", cwd=cwd
+            )
             return result.stdout
-        except Exception:
-            return f"--- a/file_{pr_number}.py\n+++ b/file_{pr_number}.py\n@@ -1,3 +1,3 @@\n-old code\n+new code"
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or "").strip()
+            logger.error("gh pr diff failed for PR #%s (%s): %s", pr_number, repo_name, stderr)
+            raise GitHubServiceError(
+                f"Could not fetch diff for PR #{pr_number}"
+                + (f" in {repo_name}" if repo_name else "")
+                + (f": {stderr}" if stderr else "")
+            ) from exc
+        except FileNotFoundError as exc:
+            logger.error("The `gh` CLI was not found on PATH.")
+            raise GitHubServiceError(
+                "The GitHub CLI (`gh`) is not installed or not on PATH."
+            ) from exc
 
     @staticmethod
-    def fetch_pr_files(pr_number: int, repo_name: str = None) -> list:
-        diff = GitHubService.fetch_pr_diff(pr_number, repo_name)
+    def fetch_pr_files(pr_number: int, repo_name: str = None, cwd: str = None) -> list:
+        """
+        Return the file paths touched by a PR.
+
+        Asks GitHub for the file list directly instead of downloading and
+        re-parsing the entire diff — the old approach cost one full `gh pr diff`
+        per PR, which dominated the runtime of the collision matrix.
+        """
+        cmd = ["gh", "pr", "view", str(pr_number), "--json", "files"]
+        if repo_name:
+            cmd.extend(["--repo", repo_name])
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, check=True, encoding="utf-8", cwd=cwd
+            )
+            payload = json.loads(result.stdout or "{}")
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or "").strip()
+            logger.error("gh pr view --json files failed for PR #%s (%s): %s", pr_number, repo_name, stderr)
+            raise GitHubServiceError(
+                f"Could not fetch file list for PR #{pr_number}"
+                + (f": {stderr}" if stderr else "")
+            ) from exc
+        except FileNotFoundError as exc:
+            logger.error("The `gh` CLI was not found on PATH.")
+            raise GitHubServiceError(
+                "The GitHub CLI (`gh`) is not installed or not on PATH."
+            ) from exc
+        except json.JSONDecodeError as exc:
+            logger.error("Unparseable JSON from gh for PR #%s: %s", pr_number, exc)
+            raise GitHubServiceError(
+                f"Malformed response from GitHub for PR #{pr_number}."
+            ) from exc
+
         files = []
-        for line in diff.splitlines():
-            if line.startswith("--- a/") or line.startswith("+++ b/"):
-                fname = line[6:].strip()
-                if fname and fname not in files:
-                    files.append(fname)
-        return files or [f"file_{pr_number}.py"]
+        for entry in payload.get("files") or []:
+            path = entry.get("path") if isinstance(entry, dict) else None
+            if path and path not in files:
+                files.append(path)
+        return files

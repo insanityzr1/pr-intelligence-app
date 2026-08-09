@@ -30,4 +30,17 @@ Use \`git rebase\` to resolve conflicts.
     expect(screen.getByText('git rebase')).toBeInTheDocument();
     expect(screen.getByText('Completed task')).toBeInTheDocument();
   });
+
+  it('renders **bold** as <strong>', () => {
+    // Regression: the bold branch was guarded by `bPart.startswith` (lowercase w),
+    // which is always undefined, so bold text rendered as literal asterisks.
+    const { container } = render(
+      <FormattedMarkdown content="This is **very important** to note." />
+    );
+
+    const strong = container.querySelector('strong');
+    expect(strong).not.toBeNull();
+    expect(strong.textContent).toBe('very important');
+    expect(container.textContent).not.toContain('**');
+  });
 });
