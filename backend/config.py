@@ -20,6 +20,19 @@ class Settings:
     DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "info")
     
+    # Git merge engine.
+    # GITHUB_TOKEN was absent entirely before: auth was ambient via `gh auth
+    # login`. When unset, GitService falls back to `gh auth token` so existing
+    # installs keep working without new configuration.
+    GITHUB_TOKEN: str = os.getenv("GITHUB_TOKEN", "")
+    GIT_MIRROR_DIR: str = os.getenv("GIT_MIRROR_DIR", ".git-mirrors")
+    GIT_FETCH_TTL: int = int(os.getenv("GIT_FETCH_TTL", 300))
+    # Real merges require cloning. Set false for offline/air-gapped runs; the
+    # app then falls back to the file-overlap heuristic.
+    GIT_MERGE_ENABLED: bool = os.getenv("GIT_MERGE_ENABLED", "true").lower() == "true"
+    # Guard against pathological workspaces: pairwise simulation is O(n^2).
+    GIT_MAX_PAIRWISE_PRS: int = int(os.getenv("GIT_MAX_PAIRWISE_PRS", 25))
+
     # CORS. Comma-separated list, or "*" for any origin.
     CORS_ALLOW_ORIGINS: list = [
         o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "*").split(",") if o.strip()

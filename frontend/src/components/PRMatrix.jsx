@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { fetchTagsMap } from '../api/client';
 import PRCommandBar from './PRCommandBar';
 import BulkActionBar from './BulkActionBar';
+import CIBadge from './CIBadge';
 import { isConflicting, isMergeable, isHighRisk, isAiAnalyzed, prRefKey } from '../utils/prStats';
 
 export default function PRMatrix({ prs, onSelectPr, tagsMap: tagsMapProp, onTagsChanged }) {
@@ -372,6 +373,7 @@ export default function PRMatrix({ prs, onSelectPr, tagsMap: tagsMapProp, onTags
                     </td>
                     <td>
                       <span className={`status-badge ${pr.status.toLowerCase()}`}>{pr.status}</span>
+                      <CIBadge pr={pr} />
                     </td>
                     <td>{pr.type}</td>
                     <td>{pr.subtype}</td>

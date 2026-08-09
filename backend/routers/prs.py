@@ -1,3 +1,4 @@
+import logging
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import PlainTextResponse
@@ -6,7 +7,11 @@ from models import PRSummaryItem, SyncRequest, AnalyzeRequest, ChatMessageReques
 from services.github_service import GitHubService
 from services.ai_service import AIService
 from services.conflict_resolution_service import ConflictResolutionService
+from services.build_service import BuildService
+from services.git_service import GitService, GitServiceError, GitUnavailableError
 import database
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/prs", tags=["PRs"])
 
@@ -165,8 +170,24 @@ def _conflict_info_for(pr_number: int, repo_name: Optional[str], force: bool = F
         if cached:
             return cached
 
-    diff = GitHubService.fetch_pr_diff(pr_number, repo_name=target_repo)
-    conflict_info = ConflictResolutionService.resolve_conflicts(pr, diff)
+    # Prefer real conflict markers from an actual merge. The resolver used to
+    # reason over a truncated slice of the PR diff, which never contained the
+    # conflict at all — it was inferring one.
+    context, real_conflict_files = "", []
+    try:
+        state = BuildService.pr_merge_state(pr)
+        real_conflict_files = state["conflict_files"]
+        if not state["clean"]:
+            context = BuildService.conflict_context(pr)
+    except (GitServiceError, GitUnavailableError) as exc:
+        logger.info("Falling back to diff context for PR #%s: %s", pr_number, exc)
+
+    if not context:
+        context = GitHubService.fetch_pr_diff(pr_number, repo_name=target_repo)
+
+    conflict_info = ConflictResolutionService.resolve_conflicts(pr, context)
+    if real_conflict_files:
+        conflict_info["conflicting_files"] = real_conflict_files
 
     if head_sha:
         database.save_conflict_resolution(pr_number, head_sha, conflict_info, target_repo)
@@ -192,9 +213,41 @@ def get_conflict_bash_script(pr_number: int, repo_name: Optional[str] = None):
 
 @router.get("/{pr_number}/conflict-patch")
 def get_conflict_patch(pr_number: int, repo_name: Optional[str] = None):
+    """
+    A real, appliable patch for merging this PR into its base.
+
+    This previously returned a comment header plus the model's prose, served as
+    `text/x-diff`; `git apply` rejected it every time. It is now produced by
+    `git diff` against the real merged tree and passes `git apply --check`.
+    The LLM narrative is only used if git is genuinely unavailable.
+    """
+    target_repo = repo_name or settings.DEFAULT_REPO
+    pr = _prs_cache.get(
+        f"{target_repo}#{pr_number}",
+        {"number": pr_number, "repo_name": target_repo, "baseRefName": "main"},
+    )
+
+    try:
+        state = BuildService.pr_merge_state(pr)
+        patch_body = GitService.diff_patch(state["repo_path"], state["base"], state["tree"])
+        note = (
+            "# Clean merge.\n" if state["clean"]
+            else "# NOTE: this merge has conflicts; the tree below contains conflict markers.\n"
+            f"# Conflicted files: {', '.join(state['conflict_files'])}\n"
+        )
+        header = (
+            f"# Merge of PR #{pr_number} into {state['base_branch']} ({target_repo})\n{note}"
+        )
+        return PlainTextResponse(
+            content=header + patch_body,
+            media_type="text/x-diff",
+            headers={"Content-Disposition": f"attachment; filename=merge_pr_{pr_number}.patch"},
+        )
+    except (GitServiceError, GitUnavailableError) as exc:
+        logger.warning("Real patch unavailable for PR #%s: %s", pr_number, exc)
+
     conflict_info = _conflict_info_for(pr_number, repo_name)
     patch_text = ConflictResolutionService.generate_patch(pr_number, conflict_info)
-    
     return PlainTextResponse(
         content=patch_text,
         media_type="text/x-diff",

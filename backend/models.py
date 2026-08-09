@@ -34,6 +34,16 @@ class PRSummaryItem(BaseModel):
     headRefName: str = ""
     baseRefName: str = "main"
     body: str = ""
+    # CI + review state. Absent before Phase 3: `gh pr list --json` never
+    # requested statusCheckRollup or reviewDecision, so the app could not tell
+    # whether a PR was even shippable.
+    checks_state: str = "NONE"          # PASSING | FAILING | PENDING | NONE
+    checks_passed: int = 0
+    checks_failed: int = 0
+    checks_pending: int = 0
+    failed_checks: List[str] = []
+    review_decision: str = ""           # APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED | ''
+    reviewers: List[str] = []
     user_tags: Optional[List[str]] = []
     ai_review: Optional[dict] = None
 

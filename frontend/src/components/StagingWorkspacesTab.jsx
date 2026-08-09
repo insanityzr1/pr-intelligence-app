@@ -2,6 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { fetchGroups, createGroup, updateGroup, deleteGroup, fetchGroupItems, addPrsToGroup, removePrFromGroup, analyzePRs, generateChangelog } from '../api/client';
 import FormattedMarkdown from './FormattedMarkdown';
 import WorkspaceModal from './WorkspaceModal';
+import BuildPanel from './BuildPanel';
+import CIBadge from './CIBadge';
 import { itemRefKey, prRefKey, isConflicting } from '../utils/prStats';
 import { useToast } from './ToastProvider';
 
@@ -407,6 +409,13 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
                 </div>
               )}
 
+              {/* Real merge simulation over the whole set. */}
+              <BuildPanel
+                groupId={activeGroupId}
+                groupName={activeGroup.name}
+                prCount={activeItems.length}
+              />
+
               {/* Workspace PRs Table & Controls */}
               <div className="group-prs-table-container">
                 <div className="table-filter-bar">
@@ -462,6 +471,7 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
                             {isConflicting(pr) && (
                               <span className="conflict-badge" title="Conflicts with base branch">⚠️ Conflict</span>
                             )}
+                            <CIBadge pr={pr} />
                           </td>
                           <td>
                             <span className={`risk-${pr.risk.toLowerCase()}`}>{pr.risk}</span>

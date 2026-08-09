@@ -72,6 +72,59 @@ def extract_summary(body, title):
             return line[:140] + ('...' if len(line) > 140 else '')
     return lines[0][:140] if lines else f"PR addressing {title.lower()}."
 
+def summarize_checks(rollup) -> dict:
+    """
+    Collapse `statusCheckRollup` into pass/fail/pending counts.
+
+    The rollup mixes two node shapes: CheckRun entries carry `status` +
+    `conclusion`, while legacy StatusContext entries carry `state`. Treating
+    either one alone silently loses half the signal on repos that use both.
+    """
+    passed = failed = pending = 0
+    failed_names = []
+
+    for node in rollup or []:
+        if not isinstance(node, dict):
+            continue
+        name = node.get("name") or node.get("context") or "check"
+
+        if node.get("status") is not None or node.get("conclusion") is not None:
+            status = (node.get("status") or "").upper()
+            conclusion = (node.get("conclusion") or "").upper()
+            if status and status != "COMPLETED":
+                pending += 1
+            elif conclusion in ("SUCCESS", "NEUTRAL", "SKIPPED"):
+                passed += 1
+            elif conclusion:
+                failed += 1
+                failed_names.append(name)
+            else:
+                pending += 1
+        else:
+            state = (node.get("state") or "").upper()
+            if state == "SUCCESS":
+                passed += 1
+            elif state in ("FAILURE", "ERROR"):
+                failed += 1
+                failed_names.append(name)
+            elif state:
+                pending += 1
+
+    if failed:
+        state = "FAILING"
+    elif pending:
+        state = "PENDING"
+    elif passed:
+        state = "PASSING"
+    else:
+        state = "NONE"
+
+    return {
+        "state": state, "passed": passed, "failed": failed,
+        "pending": pending, "failed_names": failed_names,
+    }
+
+
 class GitHubService:
     @staticmethod
     def fetch_prs(count=100, state="open", orderby="updated-desc", repo_name=None, cwd=None):
@@ -80,7 +133,12 @@ class GitHubService:
             "gh", "pr", "list",
             "--limit", str(fetch_limit),
             "--state", state,
-            "--json", "number,title,author,url,updatedAt,createdAt,isDraft,mergeable,labels,body,headRefName,baseRefName,additions,deletions,changedFiles,headRefOid"
+            # statusCheckRollup / reviewDecision / reviews were never requested,
+            # so the app was blind to CI results and approvals — the two things
+            # that actually gate a release.
+            "--json", "number,title,author,url,updatedAt,createdAt,isDraft,mergeable,labels,body,"
+                      "headRefName,baseRefName,additions,deletions,changedFiles,headRefOid,"
+                      "statusCheckRollup,reviewDecision,reviewRequests,assignees"
         ]
         if repo_name:
             cmd.extend(["--repo", repo_name])
@@ -182,6 +240,9 @@ class GitHubService:
                 risk_detail = "Small Change"
                 risk_score = 1
 
+            checks = summarize_checks(pr.get("statusCheckRollup"))
+            review_decision = pr.get("reviewDecision") or ""
+
             target_repo = repo_name if repo_name else settings.DEFAULT_REPO
 
             processed.append({
@@ -212,7 +273,17 @@ class GitHubService:
                 "labels": labels,
                 "body": body,
                 "headRefName": pr.get("headRefName", ""),
-                "baseRefName": pr.get("baseRefName", "main")
+                "baseRefName": pr.get("baseRefName", "main"),
+                "checks_state": checks["state"],
+                "checks_passed": checks["passed"],
+                "checks_failed": checks["failed"],
+                "checks_pending": checks["pending"],
+                "failed_checks": checks["failed_names"],
+                "review_decision": review_decision,
+                "reviewers": [
+                    r.get("login") or (r.get("name") or "")
+                    for r in (pr.get("reviewRequests") or []) if isinstance(r, dict)
+                ],
             })
 
         return GitHubService._apply_ordering(processed, orderby)

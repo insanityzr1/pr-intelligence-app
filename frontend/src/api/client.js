@@ -226,6 +226,46 @@ export async function addPrsToGroup(groupId, prNumbers, repoName = null) {
   return res.json();
 }
 
+// ---- Build simulation (real git merges) ------------------------------------
+
+/** Whether the backend can run real merges (git present and new enough). */
+export async function fetchBuildStatus() {
+  const res = await fetch(`${API_BASE}/build/status`);
+  if (!res.ok) throw await apiError(res, 'Failed to check build capability');
+  return res.json();
+}
+
+/**
+ * Merge a workspace's PRs together for real. Answers "does this set merge?",
+ * which GitHub's per-PR `mergeable` flag cannot.
+ */
+export async function simulateBuild({ groupId = null, prNumbers = [], repoName = null, order = null } = {}) {
+  const res = await fetch(`${API_BASE}/build/simulate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ group_id: groupId, pr_numbers: prNumbers, repo_name: repoName, order })
+  });
+  if (!res.ok) throw await apiError(res, 'Failed to simulate build');
+  return res.json();
+}
+
+/** Ship blockers: red CI, outstanding reviews, drafts, and merge conflicts. */
+export async function fetchBuildReadiness({ groupId = null, prNumbers = [], repoName = null } = {}) {
+  const res = await fetch(`${API_BASE}/build/readiness`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ group_id: groupId, pr_numbers: prNumbers, repo_name: repoName })
+  });
+  if (!res.ok) throw await apiError(res, 'Failed to load release readiness');
+  return res.json();
+}
+
+export function buildPatchUrl(groupId, repoName = null) {
+  const params = new URLSearchParams({ group_id: String(groupId) });
+  if (repoName) params.set('repo_name', repoName);
+  return `${API_BASE}/build/patch?${params.toString()}`;
+}
+
 export async function removePrFromGroup(groupId, prNumber, repoName = null) {
   const url = repoName ? `${API_BASE}/groups/${groupId}/items/${prNumber}?repo_name=${encodeURIComponent(repoName)}` : `${API_BASE}/groups/${groupId}/items/${prNumber}`;
   const res = await fetch(url, { method: 'DELETE' });

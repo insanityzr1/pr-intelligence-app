@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from config import settings
 from database import init_db
-from routers import prs, conflicts, changelog, export, repos, tags
+from routers import prs, conflicts, changelog, export, repos, tags, build
 
 def parse_cli_args():
     """Build the CLI parser. Returns the parser, not parsed args — callers decide
@@ -85,6 +85,7 @@ app.include_router(changelog.router)
 app.include_router(export.router)
 app.include_router(repos.router)
 app.include_router(tags.router)
+app.include_router(build.router)
 
 # Serve Frontend static build if present
 frontend_dist = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
