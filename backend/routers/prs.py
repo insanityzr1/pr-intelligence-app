@@ -3,7 +3,7 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 from config import settings
-from models import PRSummaryItem, SyncRequest, AnalyzeRequest, ChatMessageRequest
+from models import PRListItem, PRDetailItem, SyncRequest, AnalyzeRequest, ChatMessageRequest
 from services.github_service import GitHubService
 from services.ai_service import AIService
 from services.conflict_resolution_service import ConflictResolutionService
@@ -58,7 +58,7 @@ def sync_prs(req: SyncRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("", response_model=List[PRSummaryItem])
+@router.get("", response_model=List[PRListItem])
 def get_prs(repo_name: Optional[str] = None):
     _populate_memory_cache_from_db()
     
@@ -70,7 +70,7 @@ def get_prs(repo_name: Optional[str] = None):
         return [p for p in all_prs if p.get("repo_name") == repo_name]
     return all_prs
 
-@router.get("/{pr_number}")
+@router.get("/{pr_number}", response_model=PRDetailItem)
 def get_pr_detail(pr_number: int, repo_name: Optional[str] = None):
     target_repo = repo_name or settings.DEFAULT_REPO
     cache_key = f"{target_repo}#{pr_number}"

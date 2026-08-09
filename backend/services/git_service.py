@@ -435,3 +435,42 @@ class GitService:
             degree[pair["a"]] = degree.get(pair["a"], 0) + 1
             degree[pair["b"]] = degree.get(pair["b"], 0) + 1
         return sorted(heads, key=lambda h: (degree.get(h.get("label"), 0), h.get("pr_number") or 0))
+
+    @staticmethod
+    def suggest_hybrid_order(heads: List[dict], pairs: List[dict], stack_edges: Optional[List[dict]] = None) -> List[dict]:
+        """
+        Hybrid merge ordering: Topological stack constraints + degree-based conflict sorting.
+        
+        Preserves directed parent -> child stack constraints while placing least-entangled
+        stack trees and standalone PRs first.
+        """
+        if not stack_edges:
+            return GitService.suggest_order(heads, pairs)
+
+        degree = {h.get("label", str(h.get("pr_number", ""))): 0 for h in heads}
+        for pair in pairs:
+            degree[pair["a"]] = degree.get(pair["a"], 0) + 1
+            degree[pair["b"]] = degree.get(pair["b"], 0) + 1
+
+        by_pr = {h.get("pr_number"): h for h in heads if h.get("pr_number")}
+        parent_map = {}
+        for edge in stack_edges:
+            p, c = edge.get("parent"), edge.get("child")
+            if p in by_pr and c in by_pr:
+                parent_map[c] = p
+
+        ordered_heads = []
+        remaining = set(by_pr.keys())
+
+        while remaining:
+            ready = [n for n in remaining if parent_map.get(n) not in remaining]
+            if not ready:
+                ready = list(remaining)
+            
+            ready_sorted = sorted(ready, key=lambda n: (degree.get(by_pr[n].get("label"), 0), n))
+            next_pr = ready_sorted[0]
+            ordered_heads.append(by_pr[next_pr])
+            remaining.remove(next_pr)
+
+        unmatched = [h for h in heads if not h.get("pr_number")]
+        return ordered_heads + unmatched

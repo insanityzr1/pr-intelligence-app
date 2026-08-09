@@ -32,6 +32,26 @@ def test_ai_service_heuristic_analysis():
     assert "qa_test_scenarios" in result
     assert isinstance(result["code_quality_score"], int)
 
+def test_ollama_provider_resolution(monkeypatch):
+    from config import settings
+    
+    # Under AI_PROVIDER=auto, Ollama must be excluded even without cloud keys set
+    monkeypatch.setattr(settings, "AI_PROVIDER", "auto")
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "")
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "")
+    monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "")
+    monkeypatch.setattr(settings, "DEEPSEEK_API_KEY", "")
+    
+    auto_candidates = AIService._provider_candidates(json_mode=True)
+    names = [name for name, _call in auto_candidates]
+    assert "ollama" not in names
+
+    # Under AI_PROVIDER=ollama, Ollama is explicitly selected
+    monkeypatch.setattr(settings, "AI_PROVIDER", "ollama")
+    ollama_candidates = AIService._provider_candidates(json_mode=True)
+    names = [name for name, _call in ollama_candidates]
+    assert "ollama" in names
+
 def test_ai_service_chat_response():
     pr_data = {
         "number": 101,

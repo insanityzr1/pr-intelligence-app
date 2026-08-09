@@ -2,7 +2,26 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 from config import settings
 
-class PRSummaryItem(BaseModel):
+class PRGitRef(BaseModel):
+    headRefName: str = ""
+    baseRefName: str = "main"
+    head_sha: str = ""
+
+class PRCheckState(BaseModel):
+    checks_state: str = "NONE"          # PASSING | FAILING | PENDING | NONE
+    checks_passed: int = 0
+    checks_failed: int = 0
+    checks_pending: int = 0
+    failed_checks: List[str] = []
+    review_decision: str = ""           # APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED | ''
+
+class PRRiskAssessment(BaseModel):
+    risk: str = "Low"
+    risk_score: int = 1
+    risk_detail: str = ""
+    rec_action: str = ""
+
+class BasePRModel(BaseModel):
     number: int
     id_str: str
     url: str
@@ -12,40 +31,41 @@ class PRSummaryItem(BaseModel):
     type: str
     subtype: str
     current_status: str
-    risk: str
-    risk_detail: str
-    risk_score: int
-    rec_action: str
-    changed_files: int
-    additions: int
-    deletions: int
-    mergeable: str
     author: str
-    updated_at: str
-    updated_rel: str
-    created_at: str
-    created_fmt: str
-    head_sha: str
     repo_name: str = Field(default_factory=lambda: settings.DEFAULT_REPO)
-    labels: List[str]
-    # Declared so FastAPI's response_model does not strip them from GET /api/prs.
-    # The UI searches and displays branch names, and the workspace picker shows
-    # the head ➜ base badge.
+    labels: List[str] = []
+    updated_rel: str = ""
+
+class PRListItem(BasePRModel):
+    changed_files: int = 0
+    mergeable: str = "UNKNOWN"
+    head_sha: str = ""
     headRefName: str = ""
     baseRefName: str = "main"
+    checks_state: str = "NONE"
+    review_decision: str = ""
+    risk: str = "Low"
+    risk_score: int = 1
+
+class PRDetailItem(PRListItem):
     body: str = ""
-    # CI + review state. Absent before Phase 3: `gh pr list --json` never
-    # requested statusCheckRollup or reviewDecision, so the app could not tell
-    # whether a PR was even shippable.
-    checks_state: str = "NONE"          # PASSING | FAILING | PENDING | NONE
+    additions: int = 0
+    deletions: int = 0
+    created_at: str = ""
+    created_fmt: str = ""
+    updated_at: str = ""
+    risk_detail: str = ""
+    rec_action: str = ""
     checks_passed: int = 0
     checks_failed: int = 0
     checks_pending: int = 0
     failed_checks: List[str] = []
-    review_decision: str = ""           # APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED | ''
     reviewers: List[str] = []
     user_tags: Optional[List[str]] = []
     ai_review: Optional[dict] = None
+
+# Backward compatibility alias
+PRSummaryItem = PRListItem
 
 class SyncRequest(BaseModel):
     count: Optional[int] = None

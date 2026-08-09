@@ -27,9 +27,20 @@ class Settings:
     # Periodic reconciliation for missed webhooks. 0 disables the loop.
     SYNC_INTERVAL_SECONDS: int = int(os.getenv("SYNC_INTERVAL_SECONDS", 0))
 
-    # Optional shared-secret auth (L8). Empty = disabled, preserving the
-    # existing open-by-default behavior for local single-user installs.
-    API_KEY: str = os.getenv("API_KEY", "")
+    # Environment mode: 'development' (default) or 'production'
+    APP_ENV: str = os.getenv("APP_ENV", "development").lower()
+
+    # Shared-secret auth (L8).
+    # In development mode, defaults to "dev-secret-key" if unset.
+    # In production mode, MUST be explicitly set via environment variable or .env.
+    API_KEY: str = os.getenv(
+        "API_KEY",
+        "dev-secret-key" if os.getenv("APP_ENV", "development").lower() in ("development", "dev") else ""
+    )
+
+    def validate_security(self):
+        if self.APP_ENV == "production" and not self.API_KEY:
+            raise ValueError("APP_ENV=production requires a non-empty API_KEY to be set in environment or .env file.")
 
     # Git merge engine.
     # GITHUB_TOKEN was absent entirely before: auth was ambient via `gh auth

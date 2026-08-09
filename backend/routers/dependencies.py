@@ -19,6 +19,7 @@ class GraphRequest(BaseModel):
     # Ancestry detection needs a mirror clone; skip it when only the explicit
     # base-branch relationship is wanted.
     use_ancestry: bool = True
+    sort_mode: str = "topological"  # 'topological' | 'degree' | 'hybrid'
 
 
 @router.post("/graph")
@@ -55,7 +56,11 @@ def dependency_graph(req: GraphRequest):
             ancestry_error = str(exc)
 
     graph = DependencyService.build_graph(prs, repo_path)
-    graph["merge_order"] = DependencyService.merge_order(graph["nodes"], graph["edges"])
+    from services.conflict_service import ConflictService
+    collisions = ConflictService.detect_file_collisions(prs).get("collisions", [])
+    graph["merge_order"] = DependencyService.merge_order(
+        graph["nodes"], graph["edges"], collisions=collisions, mode=req.sort_mode
+    )
     graph["ancestry_available"] = repo_path is not None
     if ancestry_error:
         graph["ancestry_error"] = ancestry_error

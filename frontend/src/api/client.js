@@ -1,11 +1,29 @@
 const API_BASE = '/api';
 
 /**
+ * Get current API key from localStorage, window environment, or default dev-secret-key.
+ */
+function getApiKey() {
+  return (
+    (typeof localStorage !== 'undefined' && localStorage.getItem('PR_APP_API_KEY')) ||
+    (typeof window !== 'undefined' && window.__APP_ENV_KEY__) ||
+    'dev-secret-key'
+  );
+}
+
+/**
+ * Centralized fetch wrapper adding authorization headers.
+ */
+async function apiFetch(url, options = {}) {
+  const headers = {
+    'X-API-Key': getApiKey(),
+    ...(options.headers || {}),
+  };
+  return fetch(url, { ...options, headers });
+}
+
+/**
  * Build an Error carrying the server's own message.
- *
- * Most wrappers used to throw a hardcoded string and discard the response body,
- * so FastAPI's `detail` — the only text that says what actually went wrong —
- * never reached the user.
  */
 async function apiError(res, fallback) {
   let detail = '';
@@ -22,41 +40,41 @@ async function apiError(res, fallback) {
 
 export async function fetchPRs(repoName = null) {
   const url = repoName ? `${API_BASE}/prs?repo_name=${encodeURIComponent(repoName)}` : `${API_BASE}/prs`;
-  const res = await fetch(url);
-  if (!res.ok) throw await apiError(res,'Failed to fetch PRs');
+  const res = await apiFetch(url);
+  if (!res.ok) throw await apiError(res, 'Failed to fetch PRs');
   return res.json();
 }
 
 export async function syncPRs(count = null, state = 'open', orderby = 'updated-desc', repoName = null) {
-  const res = await fetch(`${API_BASE}/prs/sync`, {
+  const res = await apiFetch(`${API_BASE}/prs/sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ count, state, orderby, repo_name: repoName })
   });
-  if (!res.ok) throw await apiError(res,'Failed to sync PRs');
+  if (!res.ok) throw await apiError(res, 'Failed to sync PRs');
   return res.json();
 }
 
 export async function fetchPRDetail(prNumber, repoName = null) {
   const url = repoName ? `${API_BASE}/prs/${prNumber}?repo_name=${encodeURIComponent(repoName)}` : `${API_BASE}/prs/${prNumber}`;
-  const res = await fetch(url);
-  if (!res.ok) throw await apiError(res,'Failed to fetch PR detail');
+  const res = await apiFetch(url);
+  if (!res.ok) throw await apiError(res, 'Failed to fetch PR detail');
   return res.json();
 }
 
 export async function analyzePRs(prNumbers, force = false, repoName = null) {
-  const res = await fetch(`${API_BASE}/prs/analyze`, {
+  const res = await apiFetch(`${API_BASE}/prs/analyze`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pr_numbers: prNumbers, force, repo_name: repoName })
   });
-  if (!res.ok) throw await apiError(res,'Failed to analyze PRs');
+  if (!res.ok) throw await apiError(res, 'Failed to analyze PRs');
   return res.json();
 }
 
 export async function fetchConflicts() {
-  const res = await fetch(`${API_BASE}/conflicts`);
-  if (!res.ok) throw await apiError(res,'Failed to fetch conflicts');
+  const res = await apiFetch(`${API_BASE}/conflicts`);
+  if (!res.ok) throw await apiError(res, 'Failed to fetch conflicts');
   return res.json();
 }
 
@@ -64,104 +82,104 @@ export async function generateChangelog(prNumbers, workspaceName = null) {
   const payload = { pr_numbers: prNumbers };
   if (workspaceName) payload.workspace_name = workspaceName;
   
-  const res = await fetch(`${API_BASE}/changelog`, {
+  const res = await apiFetch(`${API_BASE}/changelog`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload)
   });
-  if (!res.ok) throw await apiError(res,'Failed to generate changelog');
+  if (!res.ok) throw await apiError(res, 'Failed to generate changelog');
   return res.json();
 }
 
 export async function fetchChangelogs() {
-  const res = await fetch(`${API_BASE}/changelog`);
-  if (!res.ok) throw await apiError(res,'Failed to fetch changelogs');
+  const res = await apiFetch(`${API_BASE}/changelog`);
+  if (!res.ok) throw await apiError(res, 'Failed to fetch changelogs');
   return res.json();
 }
 
 export async function deleteChangelog(changelogId) {
-  const res = await fetch(`${API_BASE}/changelog/${changelogId}`, { method: 'DELETE' });
-  if (!res.ok) throw await apiError(res,'Failed to delete changelog');
+  const res = await apiFetch(`${API_BASE}/changelog/${changelogId}`, { method: 'DELETE' });
+  if (!res.ok) throw await apiError(res, 'Failed to delete changelog');
   return res.json();
 }
 
 // Repositories API
 export async function fetchRepos() {
-  const res = await fetch(`${API_BASE}/repos`);
-  if (!res.ok) throw await apiError(res,'Failed to fetch repositories');
+  const res = await apiFetch(`${API_BASE}/repos`);
+  if (!res.ok) throw await apiError(res, 'Failed to fetch repositories');
   return res.json();
 }
 
 export async function addRepo(repoName) {
-  const res = await fetch(`${API_BASE}/repos`, {
+  const res = await apiFetch(`${API_BASE}/repos`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ repo_name: repoName })
   });
-  if (!res.ok) throw await apiError(res,'Failed to add repository');
+  if (!res.ok) throw await apiError(res, 'Failed to add repository');
   return res.json();
 }
 
 export async function deleteRepo(repoName) {
-  const res = await fetch(`${API_BASE}/repos/${repoName}`, {
+  const res = await apiFetch(`${API_BASE}/repos/${repoName}`, {
     method: 'DELETE'
   });
-  if (!res.ok) throw await apiError(res,'Failed to delete repository');
+  if (!res.ok) throw await apiError(res, 'Failed to delete repository');
   return res.json();
 }
 
 // AI Chat API
 export async function fetchPRChatHistory(prNumber, repoName = null) {
   const url = repoName ? `${API_BASE}/prs/${prNumber}/chat?repo_name=${encodeURIComponent(repoName)}` : `${API_BASE}/prs/${prNumber}/chat`;
-  const res = await fetch(url);
-  if (!res.ok) throw await apiError(res,'Failed to fetch chat history');
+  const res = await apiFetch(url);
+  if (!res.ok) throw await apiError(res, 'Failed to fetch chat history');
   return res.json();
 }
 
 export async function postPRChatMessage(prNumber, message, repoName = null) {
-  const res = await fetch(`${API_BASE}/prs/${prNumber}/chat`, {
+  const res = await apiFetch(`${API_BASE}/prs/${prNumber}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, repo_name: repoName })
   });
-  if (!res.ok) throw await apiError(res,'Failed to post chat message');
+  if (!res.ok) throw await apiError(res, 'Failed to post chat message');
   return res.json();
 }
 
 // AI Conflict Resolution API
 export async function fetchConflictResolution(prNumber, repoName = null) {
   const url = repoName ? `${API_BASE}/prs/${prNumber}/resolve-conflicts?repo_name=${encodeURIComponent(repoName)}` : `${API_BASE}/prs/${prNumber}/resolve-conflicts`;
-  const res = await fetch(url);
-  if (!res.ok) throw await apiError(res,'Failed to resolve conflicts');
+  const res = await apiFetch(url);
+  if (!res.ok) throw await apiError(res, 'Failed to resolve conflicts');
   return res.json();
 }
 
 // Custom Tags & Staging Groups API
 export async function fetchTagsMap() {
-  const res = await fetch(`${API_BASE}/tags`);
-  if (!res.ok) throw await apiError(res,'Failed to fetch tags');
+  const res = await apiFetch(`${API_BASE}/tags`);
+  if (!res.ok) throw await apiError(res, 'Failed to fetch tags');
   return res.json();
 }
 
 export async function addPRTag(prNumber, tag, repoName = null) {
-  const res = await fetch(`${API_BASE}/prs/${prNumber}/tags`, {
+  const res = await apiFetch(`${API_BASE}/prs/${prNumber}/tags`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tag, repo_name: repoName })
   });
-  if (!res.ok) throw await apiError(res,'Failed to add tag');
+  if (!res.ok) throw await apiError(res, 'Failed to add tag');
   return res.json();
 }
 
 export async function removePRTag(prNumber, tag, repoName = null) {
   const url = repoName ? `${API_BASE}/prs/${prNumber}/tags/${encodeURIComponent(tag)}?repo_name=${encodeURIComponent(repoName)}` : `${API_BASE}/prs/${prNumber}/tags/${encodeURIComponent(tag)}`;
-  const res = await fetch(url, { method: 'DELETE' });
-  if (!res.ok) throw await apiError(res,'Failed to remove tag');
+  const res = await apiFetch(url, { method: 'DELETE' });
+  if (!res.ok) throw await apiError(res, 'Failed to remove tag');
   return res.json();
 }
 
 export async function fetchGroups() {
-  const res = await fetch(`${API_BASE}/groups`);
+  const res = await apiFetch(`${API_BASE}/groups`);
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
     throw new Error(errData.detail || 'Failed to fetch groups');
@@ -170,7 +188,7 @@ export async function fetchGroups() {
 }
 
 export async function createGroup(name, description = '') {
-  const res = await fetch(`${API_BASE}/groups`, {
+  const res = await apiFetch(`${API_BASE}/groups`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, description })
@@ -183,7 +201,7 @@ export async function createGroup(name, description = '') {
 }
 
 export async function updateGroup(groupId, name, description = '') {
-  const res = await fetch(`${API_BASE}/groups/${groupId}`, {
+  const res = await apiFetch(`${API_BASE}/groups/${groupId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, description })
@@ -196,7 +214,7 @@ export async function updateGroup(groupId, name, description = '') {
 }
 
 export async function deleteGroup(groupId) {
-  const res = await fetch(`${API_BASE}/groups/${groupId}`, { method: 'DELETE' });
+  const res = await apiFetch(`${API_BASE}/groups/${groupId}`, { method: 'DELETE' });
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
     throw new Error(errData.detail || 'Failed to delete group');
@@ -205,7 +223,7 @@ export async function deleteGroup(groupId) {
 }
 
 export async function fetchGroupItems(groupId) {
-  const res = await fetch(`${API_BASE}/groups/${groupId}/items`);
+  const res = await apiFetch(`${API_BASE}/groups/${groupId}/items`);
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
     throw new Error(errData.detail || 'Failed to fetch group items');
@@ -214,7 +232,7 @@ export async function fetchGroupItems(groupId) {
 }
 
 export async function addPrsToGroup(groupId, prNumbers, repoName = null) {
-  const res = await fetch(`${API_BASE}/groups/${groupId}/items`, {
+  const res = await apiFetch(`${API_BASE}/groups/${groupId}/items`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pr_numbers: prNumbers, repo_name: repoName })
@@ -228,13 +246,8 @@ export async function addPrsToGroup(groupId, prNumbers, repoName = null) {
 
 // ---- Async AI jobs ---------------------------------------------------------
 
-/**
- * Queue a batch AI review. Returns immediately; progress arrives over SSE as
- * `job_update` events. The synchronous endpoint ran N sequential LLM calls
- * inside one request, which a browser timeout could discard entirely.
- */
 export async function startAnalyzeJob(prNumbers, repoName = null, force = false) {
-  const res = await fetch(`${API_BASE}/jobs/analyze`, {
+  const res = await apiFetch(`${API_BASE}/jobs/analyze`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pr_numbers: prNumbers, repo_name: repoName, force })
@@ -244,13 +257,13 @@ export async function startAnalyzeJob(prNumbers, repoName = null, force = false)
 }
 
 export async function cancelJob(jobId) {
-  const res = await fetch(`${API_BASE}/jobs/${jobId}/cancel`, { method: 'POST' });
+  const res = await apiFetch(`${API_BASE}/jobs/${jobId}/cancel`, { method: 'POST' });
   if (!res.ok) throw await apiError(res, 'Failed to cancel job');
   return res.json();
 }
 
 export async function fetchJobs(limit = 50) {
-  const res = await fetch(`${API_BASE}/jobs?limit=${limit}`);
+  const res = await apiFetch(`${API_BASE}/jobs?limit=${limit}`);
   if (!res.ok) throw await apiError(res, 'Failed to load jobs');
   return res.json();
 }
@@ -258,7 +271,7 @@ export async function fetchJobs(limit = 50) {
 // ---- GitHub write-back -----------------------------------------------------
 
 export async function postReviewComment(prNumber, repoName = null) {
-  const res = await fetch(`${API_BASE}/writeback/review-comment`, {
+  const res = await apiFetch(`${API_BASE}/writeback/review-comment`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pr_number: prNumber, repo_name: repoName })
@@ -268,7 +281,7 @@ export async function postReviewComment(prNumber, repoName = null) {
 }
 
 export async function syncLabels(prNumber, repoName = null) {
-  const res = await fetch(`${API_BASE}/writeback/sync-labels`, {
+  const res = await apiFetch(`${API_BASE}/writeback/sync-labels`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ pr_number: prNumber, repo_name: repoName })
@@ -277,9 +290,8 @@ export async function syncLabels(prNumber, repoName = null) {
   return res.json();
 }
 
-/** Defaults to a dry run — this is the most destructive action in the app. */
 export async function mergeSequence({ groupId = null, prNumbers = [], repoName = null, method = 'squash', dryRun = true } = {}) {
-  const res = await fetch(`${API_BASE}/writeback/merge-sequence`, {
+  const res = await apiFetch(`${API_BASE}/writeback/merge-sequence`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -293,12 +305,11 @@ export async function mergeSequence({ groupId = null, prNumbers = [], repoName =
 
 // ---- PR dependency graph ---------------------------------------------------
 
-/** Stacked-PR graph. A stack is otherwise misreported as a file conflict. */
-export async function fetchDependencyGraph({ repoName = null, groupId = null, prNumbers = [] } = {}) {
-  const res = await fetch(`${API_BASE}/dependencies/graph`, {
+export async function fetchDependencyGraph({ repoName = null, groupId = null, prNumbers = [], sortMode = 'topological' } = {}) {
+  const res = await apiFetch(`${API_BASE}/dependencies/graph`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ repo_name: repoName, group_id: groupId, pr_numbers: prNumbers })
+    body: JSON.stringify({ repo_name: repoName, group_id: groupId, pr_numbers: prNumbers, sort_mode: sortMode })
   });
   if (!res.ok) throw await apiError(res, 'Failed to load dependency graph');
   return res.json();
@@ -306,19 +317,14 @@ export async function fetchDependencyGraph({ repoName = null, groupId = null, pr
 
 // ---- Build simulation (real git merges) ------------------------------------
 
-/** Whether the backend can run real merges (git present and new enough). */
 export async function fetchBuildStatus() {
-  const res = await fetch(`${API_BASE}/build/status`);
+  const res = await apiFetch(`${API_BASE}/build/status`);
   if (!res.ok) throw await apiError(res, 'Failed to check build capability');
   return res.json();
 }
 
-/**
- * Merge a workspace's PRs together for real. Answers "does this set merge?",
- * which GitHub's per-PR `mergeable` flag cannot.
- */
 export async function simulateBuild({ groupId = null, prNumbers = [], repoName = null, order = null } = {}) {
-  const res = await fetch(`${API_BASE}/build/simulate`, {
+  const res = await apiFetch(`${API_BASE}/build/simulate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ group_id: groupId, pr_numbers: prNumbers, repo_name: repoName, order })
@@ -327,9 +333,8 @@ export async function simulateBuild({ groupId = null, prNumbers = [], repoName =
   return res.json();
 }
 
-/** Ship blockers: red CI, outstanding reviews, drafts, and merge conflicts. */
 export async function fetchBuildReadiness({ groupId = null, prNumbers = [], repoName = null } = {}) {
-  const res = await fetch(`${API_BASE}/build/readiness`, {
+  const res = await apiFetch(`${API_BASE}/build/readiness`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ group_id: groupId, pr_numbers: prNumbers, repo_name: repoName })
@@ -346,7 +351,7 @@ export function buildPatchUrl(groupId, repoName = null) {
 
 export async function removePrFromGroup(groupId, prNumber, repoName = null) {
   const url = repoName ? `${API_BASE}/groups/${groupId}/items/${prNumber}?repo_name=${encodeURIComponent(repoName)}` : `${API_BASE}/groups/${groupId}/items/${prNumber}`;
-  const res = await fetch(url, { method: 'DELETE' });
+  const res = await apiFetch(url, { method: 'DELETE' });
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
     throw new Error(errData.detail || 'Failed to remove PR from group');

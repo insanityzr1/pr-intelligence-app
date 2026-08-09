@@ -78,10 +78,12 @@ async def lifespan(app: FastAPI):
     and the AI job queue both need somewhere to be owned and, importantly,
     cancelled — otherwise a reload leaks tasks.
     """
+    settings.validate_security()
     stop_event = asyncio.Event()
     sync_task = asyncio.create_task(SyncService.run_periodic(stop_event))
     logger.info(
-        "Started. Background sync: %s. Auth: %s.",
+        "Started [%s]. Background sync: %s. Auth: %s.",
+        settings.APP_ENV,
         f"every {settings.SYNC_INTERVAL_SECONDS}s" if settings.SYNC_INTERVAL_SECONDS > 0 else "disabled",
         "enabled" if auth_enabled() else "disabled (open)",
     )

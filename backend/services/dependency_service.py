@@ -126,15 +126,34 @@ class DependencyService:
         return chains
 
     @staticmethod
-    def merge_order(nodes: List[dict], edges: List[dict]) -> List[int]:
+    def merge_order(
+        nodes: List[dict],
+        edges: List[dict],
+        collisions: Optional[List[dict]] = None,
+        mode: str = "topological"
+    ) -> List[int]:
         """
-        Topological order — parents before children.
-
-        Unlike the build simulation's degree-based ordering, this *is* a real
-        dependency order: a stack edge is directed, so merging a child before
-        its parent is simply wrong.
+        Merge order calculation supporting three strategies:
+        - 'topological': Strict parent-before-child ordering.
+        - 'degree': Least file collisions first.
+        - 'hybrid': Topological dependency constraints preserved + ready nodes sorted by lowest conflict degree.
         """
         numbers = [n["pr_number"] for n in nodes]
+        
+        # Calculate conflict degree per PR number if collisions provided
+        degree: Dict[int, int] = {n: 0 for n in numbers}
+        if collisions:
+            for c in collisions:
+                pr_a = c.get("pr_a")
+                pr_b = c.get("pr_b")
+                if pr_a in degree:
+                    degree[pr_a] += 1
+                if pr_b in degree:
+                    degree[pr_b] += 1
+
+        if mode == "degree":
+            return sorted(numbers, key=lambda n: (degree.get(n, 0), n))
+
         parents: Dict[int, set] = {n: set() for n in numbers}
         for edge in edges:
             if edge["child"] in parents and edge["parent"] in parents:
@@ -142,13 +161,19 @@ class DependencyService:
 
         ordered, remaining = [], dict(parents)
         while remaining:
-            ready = sorted(n for n, ps in remaining.items() if not (ps - set(ordered)))
+            ready = [n for n, ps in remaining.items() if not (ps - set(ordered))]
             if not ready:
                 # Cycle: emit the rest deterministically rather than looping.
                 ordered.extend(sorted(remaining))
                 break
-            ordered.extend(ready)
-            for n in ready:
+
+            if mode == "hybrid":
+                ready_sorted = sorted(ready, key=lambda n: (degree.get(n, 0), n))
+            else:
+                ready_sorted = sorted(ready)
+
+            ordered.extend(ready_sorted)
+            for n in ready_sorted:
                 remaining.pop(n)
         return ordered
 
