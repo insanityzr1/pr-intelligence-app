@@ -1,14 +1,25 @@
 import argparse
+import asyncio
 import logging
 import os
 import sys
-from fastapi import FastAPI, HTTPException
+from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from config import settings
 from database import init_db
-from routers import prs, conflicts, changelog, export, repos, tags, build
+from routers import (
+    prs, conflicts, changelog, export, repos, tags, build,
+    events, jobs, writeback, dependencies,
+)
+from services.auth_service import auth_enabled, require_api_key
+from services.job_service import JobService
+from services.sync_service import SyncService
+
+logger = logging.getLogger(__name__)
 
 def parse_cli_args():
     """Build the CLI parser. Returns the parser, not parsed args — callers decide
@@ -57,11 +68,40 @@ logging.basicConfig(
 # Initialize DB tables & defaults
 init_db()
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Start and stop background work with the app.
+
+    There was no startup/shutdown hook at all before: the background sync loop
+    and the AI job queue both need somewhere to be owned and, importantly,
+    cancelled — otherwise a reload leaks tasks.
+    """
+    stop_event = asyncio.Event()
+    sync_task = asyncio.create_task(SyncService.run_periodic(stop_event))
+    logger.info(
+        "Started. Background sync: %s. Auth: %s.",
+        f"every {settings.SYNC_INTERVAL_SECONDS}s" if settings.SYNC_INTERVAL_SECONDS > 0 else "disabled",
+        "enabled" if auth_enabled() else "disabled (open)",
+    )
+    try:
+        yield
+    finally:
+        stop_event.set()
+        sync_task.cancel()
+        await asyncio.gather(sync_task, return_exceptions=True)
+        await JobService.shutdown()
+        logger.info("Shutdown complete.")
+
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
     debug=settings.DEBUG,
-    description="FastAPI + React AI-Powered PR Intelligence Application"
+    description="FastAPI + React AI-Powered PR Intelligence Application",
+    lifespan=lifespan,
+    dependencies=[Depends(require_api_key)],
 )
 
 # CORS.
@@ -86,6 +126,10 @@ app.include_router(export.router)
 app.include_router(repos.router)
 app.include_router(tags.router)
 app.include_router(build.router)
+app.include_router(events.router)
+app.include_router(jobs.router)
+app.include_router(writeback.router)
+app.include_router(dependencies.router)
 
 # Serve Frontend static build if present
 frontend_dist = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
@@ -107,6 +151,7 @@ def version():
         "app_env": settings.APP_ENV,
         "ai_provider": settings.AI_PROVIDER,
         "default_repo": settings.DEFAULT_REPO,
+        "auth_required": auth_enabled(),
     }
 
 

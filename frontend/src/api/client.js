@@ -226,6 +226,84 @@ export async function addPrsToGroup(groupId, prNumbers, repoName = null) {
   return res.json();
 }
 
+// ---- Async AI jobs ---------------------------------------------------------
+
+/**
+ * Queue a batch AI review. Returns immediately; progress arrives over SSE as
+ * `job_update` events. The synchronous endpoint ran N sequential LLM calls
+ * inside one request, which a browser timeout could discard entirely.
+ */
+export async function startAnalyzeJob(prNumbers, repoName = null, force = false) {
+  const res = await fetch(`${API_BASE}/jobs/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pr_numbers: prNumbers, repo_name: repoName, force })
+  });
+  if (!res.ok) throw await apiError(res, 'Failed to queue AI review');
+  return res.json();
+}
+
+export async function cancelJob(jobId) {
+  const res = await fetch(`${API_BASE}/jobs/${jobId}/cancel`, { method: 'POST' });
+  if (!res.ok) throw await apiError(res, 'Failed to cancel job');
+  return res.json();
+}
+
+export async function fetchJobs(limit = 50) {
+  const res = await fetch(`${API_BASE}/jobs?limit=${limit}`);
+  if (!res.ok) throw await apiError(res, 'Failed to load jobs');
+  return res.json();
+}
+
+// ---- GitHub write-back -----------------------------------------------------
+
+export async function postReviewComment(prNumber, repoName = null) {
+  const res = await fetch(`${API_BASE}/writeback/review-comment`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pr_number: prNumber, repo_name: repoName })
+  });
+  if (!res.ok) throw await apiError(res, 'Failed to post review comment');
+  return res.json();
+}
+
+export async function syncLabels(prNumber, repoName = null) {
+  const res = await fetch(`${API_BASE}/writeback/sync-labels`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pr_number: prNumber, repo_name: repoName })
+  });
+  if (!res.ok) throw await apiError(res, 'Failed to sync labels');
+  return res.json();
+}
+
+/** Defaults to a dry run — this is the most destructive action in the app. */
+export async function mergeSequence({ groupId = null, prNumbers = [], repoName = null, method = 'squash', dryRun = true } = {}) {
+  const res = await fetch(`${API_BASE}/writeback/merge-sequence`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      group_id: groupId, pr_numbers: prNumbers, repo_name: repoName,
+      method, dry_run: dryRun
+    })
+  });
+  if (!res.ok) throw await apiError(res, 'Failed to merge sequence');
+  return res.json();
+}
+
+// ---- PR dependency graph ---------------------------------------------------
+
+/** Stacked-PR graph. A stack is otherwise misreported as a file conflict. */
+export async function fetchDependencyGraph({ repoName = null, groupId = null, prNumbers = [] } = {}) {
+  const res = await fetch(`${API_BASE}/dependencies/graph`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repo_name: repoName, group_id: groupId, pr_numbers: prNumbers })
+  });
+  if (!res.ok) throw await apiError(res, 'Failed to load dependency graph');
+  return res.json();
+}
+
 // ---- Build simulation (real git merges) ------------------------------------
 
 /** Whether the backend can run real merges (git present and new enough). */

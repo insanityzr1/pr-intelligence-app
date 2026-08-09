@@ -1,15 +1,51 @@
 import React, { useState, useEffect } from 'react';
-import { fetchPRDetail, analyzePRs, fetchPRChatHistory, postPRChatMessage, fetchTagsMap } from '../api/client';
+import { fetchPRDetail, analyzePRs, fetchPRChatHistory, postPRChatMessage, fetchTagsMap, postReviewComment, syncLabels } from '../api/client';
+import { useToast } from './ToastProvider';
 import FormattedMarkdown from './FormattedMarkdown';
 import PRTagBar from './PRTagBar';
 import { refKey } from '../utils/prStats';
 
 export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveConflict }) {
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState('overview');
   const [pr, setPr] = useState(null);
   const [activeTags, setActiveTags] = useState([]);
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
+  const [posting, setPosting] = useState(false);
+
+  async function handlePostReview() {
+    setPosting(true);
+    try {
+      await postReviewComment(prNumber, repoName || pr?.repo_name);
+      toast.success(`Posted the AI review to PR #${prNumber}.`);
+    } catch (err) {
+      console.error(err);
+      toast.error(`Could not post review: ${err.message}`);
+    } finally {
+      setPosting(false);
+    }
+  }
+
+  async function handleSyncLabels() {
+    setPosting(true);
+    try {
+      const res = await syncLabels(prNumber, repoName || pr?.repo_name);
+      const applied = res.applied?.length || 0;
+      if (res.failed?.length) {
+        // Usually the label does not exist in the repo — worth naming rather
+        // than reporting a blanket success.
+        toast.error(`Applied ${applied}; ${res.failed.length} failed (label may not exist in the repo).`);
+      } else {
+        toast.success(`Synced ${applied} label${applied === 1 ? '' : 's'} to GitHub.`);
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error(`Could not sync labels: ${err.message}`);
+    } finally {
+      setPosting(false);
+    }
+  }
 
   // Chat State
   const [chatHistory, setChatHistory] = useState([]);
@@ -117,6 +153,18 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
             <button onClick={handleReAnalyze} disabled={analyzing} className="btn btn-primary btn-sm">
               {analyzing ? 'Analyzing...' : 'Re-Run AI Analysis'}
             </button>
+            {/* Write-back: analysis that cannot leave the tool is analysis the
+                rest of the team never sees. */}
+            {pr?.ai_review && (
+              <button onClick={handlePostReview} disabled={posting} className="btn btn-secondary btn-sm">
+                {posting ? 'Posting…' : '💬 Post Review to GitHub'}
+              </button>
+            )}
+            {activeTags.length > 0 && (
+              <button onClick={handleSyncLabels} disabled={posting} className="btn btn-secondary btn-sm">
+                🏷️ Sync Labels
+              </button>
+            )}
             <button className="close-btn" onClick={onClose}>&times;</button>
           </div>
         </div>

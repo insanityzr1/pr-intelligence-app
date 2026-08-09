@@ -1,5 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { fetchGroups, createGroup, updateGroup, deleteGroup, fetchGroupItems, addPrsToGroup, removePrFromGroup, analyzePRs, generateChangelog } from '../api/client';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { fetchGroups, createGroup, updateGroup, deleteGroup, fetchGroupItems, addPrsToGroup, removePrFromGroup, generateChangelog, startAnalyzeJob, cancelJob } from '../api/client';
+import { useEventStream } from '../hooks/useEventStream';
+import JobProgress, { isJobFinished } from './JobProgress';
 import FormattedMarkdown from './FormattedMarkdown';
 import WorkspaceModal from './WorkspaceModal';
 import BuildPanel from './BuildPanel';
@@ -29,6 +31,9 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
   // Batch Action States
   const [batchAnalyzing, setBatchAnalyzing] = useState(false);
   const [batchChangelog, setBatchChangelog] = useState(null);
+  const [activeJob, setActiveJob] = useState(null);
+  // Read inside the SSE handler, which closes over its first render.
+  const activeJobRef = useRef(null);
 
   useEffect(() => {
     loadGroups();
@@ -171,25 +176,57 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
     }
   }
 
+  // Live job progress, pushed over SSE.
+  useEventStream({
+    job_update: (payload) => {
+      setActiveJob(prev => (prev && prev.id === payload.id ? { ...prev, ...payload } : prev));
+      if (payload.id === activeJobRef.current && isJobFinished(payload.status)) {
+        // Refresh so the new AI reviews actually appear — the old blocking
+        // version never reloaded, so results stayed invisible until a manual sync.
+        loadGroupItems(activeGroupId);
+        if (payload.status === 'done') {
+          toast.success(`AI review complete for ${payload.completed} PRs.`);
+        } else if (payload.status === 'completed_with_errors') {
+          toast.error(`AI review finished with ${payload.failed} failure(s).`);
+        }
+      }
+    },
+  });
+
   async function handleBatchAnalyze() {
     if (activeItems.length === 0) return;
     setBatchAnalyzing(true);
     try {
-      // Analyze per repository so each batch carries the repo it belongs to.
+      // Queue per repository so each batch carries the repo it belongs to.
       const byRepo = {};
       for (const item of activeItems) {
         if (!byRepo[item.repo_name]) byRepo[item.repo_name] = [];
         byRepo[item.repo_name].push(item.pr_number);
       }
+
+      let last = null;
       for (const [repo, nums] of Object.entries(byRepo)) {
-        await analyzePRs(nums, true, repo);
+        const res = await startAnalyzeJob(nums, repo, true);
+        last = res.job;
       }
-      toast.success(`Batch AI review complete for ${activeItems.length} PRs.`);
+      if (last) {
+        setActiveJob(last);
+        activeJobRef.current = last.id;
+      }
     } catch (err) {
       console.error(err);
-      toast.error(`Batch AI review failed: ${err.message}`);
+      toast.error(`Could not queue AI review: ${err.message}`);
     } finally {
       setBatchAnalyzing(false);
+    }
+  }
+
+  async function handleCancelJob(jobId) {
+    try {
+      await cancelJob(jobId);
+      toast.info('Cancelling after the current PR finishes.');
+    } catch (err) {
+      toast.error(`Could not cancel: ${err.message}`);
     }
   }
 
@@ -381,7 +418,7 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
                     disabled={batchAnalyzing || activeItems.length === 0}
                     className="btn btn-primary btn-action-ai"
                   >
-                    {batchAnalyzing ? 'Analyzing Bucket...' : `⚡ Batch AI Review (${activeItems.length})`}
+                    {batchAnalyzing ? 'Queueing…' : `⚡ Batch AI Review (${activeItems.length})`}
                   </button>
                   <button
                     onClick={handleBatchChangelog}
@@ -407,6 +444,11 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
                   {activeConflictCount === 1 ? ' PR conflicts' : ' PRs conflict'} with their base
                   branch. Resolve before building this release.
                 </div>
+              )}
+
+              {/* Live AI job progress, pushed over SSE. */}
+              {activeJob && (
+                <JobProgress job={activeJob} onCancel={handleCancelJob} />
               )}
 
               {/* Real merge simulation over the whole set. */}

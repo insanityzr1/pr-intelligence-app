@@ -35,6 +35,31 @@ per-PR `mergeable` flag, which only answers *"does this PR merge into main?"*.
 - Requires **git ≥ 2.38**. Set `GIT_MERGE_ENABLED=false` for offline runs; the app then falls
   back to the file-overlap heuristic and says so in the UI.
 
+### 📡 Live Updates, Webhooks & Async AI Jobs
+- **GitHub Webhooks**: HMAC-verified `POST /api/webhooks/github` for `pull_request`,
+  `check_suite`, `push`, and review events. Set `GITHUB_WEBHOOK_SECRET` before exposing it.
+- **Server-Sent Events**: `GET /api/events` pushes PR updates and job progress to the UI.
+  A live/offline dot in the header distinguishes "nothing changed" from "the stream is down".
+- **Background Reconciliation**: optional `SYNC_INTERVAL_SECONDS` loop catches missed
+  deliveries.
+- **Async AI Jobs**: batch review is queued (`POST /api/jobs/analyze`) and returns
+  immediately, with live progress, per-PR errors, and cooperative cancellation — instead of
+  one opaque multi-minute request a browser timeout could discard.
+
+### ↩️ Write-Back to GitHub
+- **Post AI Reviews** as PR comments, and **sync app tags to GitHub labels**.
+- **Merge a Workspace in Order** using the simulation's computed sequence.
+  **Dry run by default** — it aborts at the first failure, since every later merge would
+  target a base the simulation never modelled.
+
+### 🧬 Stacked-PR Dependency Graph
+- Detects PRs branched off other PRs via **explicit base branch** and **commit ancestry**
+  (the latter survives a retarget onto `main`).
+- Produces a genuinely **topological** merge order — unlike the build simulation's
+  degree-based ordering, a stack edge is directed.
+- **Filters stack false positives** out of the Collision Matrix: a stacked PR necessarily
+  touches its parent's files, which was the largest source of noise there.
+
 ### 🚦 Release-Readiness Gate
 - **CI & Review Ingestion**: `statusCheckRollup` and `reviewDecision` per PR, shown as badges
   in the matrix and workspace tables.
@@ -189,10 +214,17 @@ pr-intelligence-app/
 │   ├── config.py                # Environment & CLI Configuration Loader
 │   ├── database.py              # SQLite Schema & Operations Manager
 │   ├── models.py                # Pydantic Schemas
-│   ├── routers/                 # API Endpoint Routers (prs, conflicts, changelog, tags, export, repos, build)
+│   ├── routers/                 # API Routers (prs, conflicts, changelog, tags, export, repos,
+│   │                            #   build, events, jobs, writeback, dependencies)
 │   ├── services/                # Business Logic Services
 │   │   ├── git_service.py       #   Real merges via `git merge-tree` on a bare mirror clone
 │   │   ├── build_service.py     #   Workspace build simulation & release-readiness gate
+│   │   ├── dependency_service.py#   Stacked-PR detection & topological merge order
+│   │   ├── sync_service.py      #   Background + webhook-driven PR synchronization
+│   │   ├── job_service.py       #   Async AI job queue with progress & cancellation
+│   │   ├── writeback_service.py #   Comments, labels, and ordered merges back to GitHub
+│   │   ├── event_bus.py         #   In-process pub/sub backing the SSE stream
+│   │   ├── auth_service.py      #   Optional shared-secret API key
 │   │   └── ...                  #   AIService, ConflictResolution, GitHubService, DiffParser
 │   └── tests/                   # Pytest Test Suite (test_database, test_services, test_routers)
 ├── frontend/

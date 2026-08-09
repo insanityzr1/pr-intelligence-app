@@ -170,6 +170,27 @@ class GitService:
         return oid
 
     @staticmethod
+    def is_ancestor(path: str, maybe_ancestor: str, descendant: str) -> bool:
+        """
+        True when `maybe_ancestor` is reachable from `descendant`.
+
+        This is how a stacked PR is recognised without relying on the base
+        branch still pointing at its parent — the stack survives a retarget.
+        """
+        GitService.rev_parse(path, maybe_ancestor)
+        GitService.rev_parse(path, descendant)
+        result = _run(
+            ["git", "merge-base", "--is-ancestor", maybe_ancestor, descendant],
+            cwd=path, check=False,
+        )
+        # 0 = ancestor, 1 = not. Anything else is a real failure.
+        if result.returncode not in (0, 1):
+            raise GitServiceError(
+                f"merge-base failed: {(result.stderr or '').strip()}"
+            )
+        return result.returncode == 0
+
+    @staticmethod
     def commit_tree(path: str, tree: str, parents: List[str], message: str) -> str:
         """
         Wrap a merged tree in a real commit.

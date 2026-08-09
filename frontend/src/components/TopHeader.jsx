@@ -7,7 +7,8 @@ export default function TopHeader({
   prs = [],
   onMobileMenuToggle,
   searchQuery,
-  setSearchQuery
+  setSearchQuery,
+  liveConnected = false
 }) {
   const getTabDetails = (tab) => {
     switch (tab) {
@@ -86,6 +87,16 @@ export default function TopHeader({
       </div>
 
       <div className="top-header-right">
+        {/* Whether the app is receiving live updates, so "nothing changed" is
+            distinguishable from "the stream is down". */}
+        <span
+          className={`live-dot ${liveConnected ? 'live' : 'offline'}`}
+          title={liveConnected ? 'Live updates connected' : 'Live updates disconnected — data may be stale'}
+        >
+          <span aria-hidden="true">●</span>
+          <span className="sr-only">{liveConnected ? 'Live' : 'Offline'}</span>
+        </span>
+
         <div className="top-kpi-group">
           <div className="kpi-chip kpi-total" title="Total Pull Requests">
             <span className="kpi-label">PRs</span>

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { fetchPRs, syncPRs, fetchRepos, fetchTagsMap } from './api/client';
 import { prNumberOf, tagKeyOf, headBranchOf, baseBranchOf } from './utils/prStats';
 import { readParams, writeParams } from './hooks/useUrlState';
+import { useEventStream } from './hooks/useEventStream';
 import { useToast } from './components/ToastProvider';
 import KeyboardHelpOverlay from './components/KeyboardHelpOverlay';
 import Sidebar from './components/Sidebar';
@@ -216,6 +217,21 @@ export default function App() {
     }
   }
 
+  // Live updates. Data used to be stale until someone clicked "Sync PRs Now";
+  // webhook deliveries and the background sync worker now push changes here.
+  const { connected: liveConnected } = useEventStream({
+    prs_updated: (payload) => {
+      // Only refetch when the update concerns what is on screen.
+      if (!selectedRepo || payload.repo_name === selectedRepo) {
+        loadPrs();
+        toast.info(`${payload.changed} PR${payload.changed === 1 ? '' : 's'} updated in ${payload.repo_name}.`);
+      }
+    },
+    sync_failed: (payload) => {
+      toast.error(`Sync failed for ${payload.repo_name}: ${payload.error}`);
+    },
+  });
+
   // Resolve the PR's repository from the PR itself, falling back to the active repo
   // filter. Callers that already know the repo pass it explicitly.
   function handleSelectPr(num, repoName) {
@@ -282,6 +298,7 @@ export default function App() {
           onMobileMenuToggle={() => setMobileOpen(true)}
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
+          liveConnected={liveConnected}
         />
 
         {loading ? (

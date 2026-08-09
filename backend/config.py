@@ -20,6 +20,17 @@ class Settings:
     DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "info")
     
+    # Event-driven freshness (L4).
+    # Secret shared with GitHub's webhook config; when empty, deliveries are
+    # accepted unverified and a warning is logged.
+    GITHUB_WEBHOOK_SECRET: str = os.getenv("GITHUB_WEBHOOK_SECRET", "")
+    # Periodic reconciliation for missed webhooks. 0 disables the loop.
+    SYNC_INTERVAL_SECONDS: int = int(os.getenv("SYNC_INTERVAL_SECONDS", 0))
+
+    # Optional shared-secret auth (L8). Empty = disabled, preserving the
+    # existing open-by-default behavior for local single-user installs.
+    API_KEY: str = os.getenv("API_KEY", "")
+
     # Git merge engine.
     # GITHUB_TOKEN was absent entirely before: auth was ambient via `gh auth
     # login`. When unset, GitService falls back to `gh auth token` so existing

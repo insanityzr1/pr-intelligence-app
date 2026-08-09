@@ -4,22 +4,27 @@
 
 ## Context
 
+> **Status: Phases 1–4 complete**, apart from the deliberately-deferred part of L8
+> (per-user auth + migrations). The finding below describes the app as it was *before*
+> Phase 3; the merge engine now exists.
+
 The app's purpose is to help high-velocity teams assemble **builds** ("PR Workspaces") by
 selecting PRs and seeing merge conflicts. An audit of the backend and frontend found that
-the core promise is not actually implemented, and that several visible counters and
+the core promise was not actually implemented, and that several visible counters and
 renderers were reading field names the API never returns.
 
-**The central finding: nothing in the codebase ever executes git.** Two disconnected
-conflict subsystems exist, and neither merges anything:
+**The central finding: nothing in the codebase ever executed git.** Two disconnected
+conflict subsystems existed, and neither merged anything:
 
 1. `backend/services/conflict_service.py` — a file-path overlap heuristic ("N PRs touch
    this file"). No hunk overlap, no mergeability.
 2. `backend/services/conflict_resolution_service.py` — LLM prose over a truncated diff.
-   Its `.patch` output is a comment header plus the model's prose, so `git apply` rejects it.
+   Its `.patch` output was a comment header plus the model's prose, so `git apply` rejected it.
 
-Everything else is GitHub's `mergeable` flag, which answers *"does this PR merge into
+Everything else was GitHub's `mergeable` flag, which answers *"does this PR merge into
 base?"* — never *"do these 6 PRs merge into each other?"*, which is the only question a
-build actually asks.
+build actually asks. **Phase 3 (`services/git_service.py`) answers it by running a real
+merge.**
 
 ---
 
@@ -27,14 +32,14 @@ build actually asks.
 
 | # | Feature | Summary |
 |---|---------|---------|
-| **L1** | **Real git merge engine** | Bare mirror clone + `git merge-tree --write-tree` (no working tree). Gives true PR↔PR conflicts with file *and hunk* ranges, a genuinely appliable `.patch`, and real conflict markers to feed the LLM. Prerequisite for everything below. |
-| **L2** | **Workspace as candidate build** | Pairwise conflict matrix for a workspace, cumulative merge simulation ("PRs 1–4 clean; adding #1874 breaks against #1902"), suggested merge order, live re-simulation as PRs are added. |
-| **L3** | **Release-readiness gate** | Ingest `statusCheckRollup`, `reviewDecision`, `reviews` (currently not requested at all). Surface ship blockers per workspace: failing CI, unapproved, conflicting, stale. |
-| **L4** | **Event-driven freshness** | GitHub webhooks + background sync worker + SSE push. Replaces manual "Sync PRs Now" and the per-process `_prs_cache` dict. |
-| **L5** | **Async job queue for AI ops** | Per-PR job state, streamed progress, cancellation, cost/token accounting, cross-provider failover (today a single provider failure drops straight to heuristics). |
-| **L6** | **Write-back to GitHub** | Post AI reviews as PR comments, sync tags ↔ labels, trigger merges in computed order, open a release-branch PR carrying the changelog. |
-| **L7** | **PR dependency / stacked-PR graph** | Detect stacked branches and shared-symbol coupling; topological merge order. Today a stack is *misreported* as a conflict. |
-| **L8** | **Multi-tenancy & data model** | Auth (none today; CORS is `*` with credentials, `HOST=0.0.0.0`), Alembic migrations, repo-scoped keys, Postgres path. |
+| **L1** | **Real git merge engine** ✅ | Bare mirror clone + `git merge-tree --write-tree` (no working tree). True PR↔PR conflicts with real file paths, a genuinely appliable `.patch`, and real conflict markers fed to the LLM. |
+| **L2** | **Workspace as candidate build** ✅ | Pairwise conflict matrix, cumulative merge simulation ("PRs 1–4 clean; adding #1874 breaks against #1902"), suggested merge order. |
+| **L3** | **Release-readiness gate** ✅ | Ingests `statusCheckRollup` / `reviewDecision` (never requested before). Ship blockers per workspace: failing CI, unapproved, conflicting, draft. |
+| **L4** | **Event-driven freshness** ✅ | HMAC-verified GitHub webhooks + background sync loop + SSE push, replacing manual-only "Sync PRs Now". |
+| **L5** | **Async job queue for AI ops** ✅ | Queued batch review with live progress, per-PR errors, and cooperative cancellation. |
+| **L6** | **Write-back to GitHub** ✅ | AI reviews as PR comments, tags → labels, ordered workspace merges (dry-run by default). |
+| **L7** | **PR dependency / stacked-PR graph** ✅ | Explicit-base *and* ancestry detection; topological merge order; filters stack false positives out of the Collision Matrix. |
+| **L8** | **Auth & data model** ◐ | Optional shared-secret API key (done). Per-user OAuth, workspace ownership, and Alembic migrations deliberately deferred — see Phase 4 notes. |
 
 ## Quick wins
 
@@ -189,24 +194,153 @@ $ python -c "import sys; sys.argv=['uvicorn','--port','9123']; import main; ..."
 cover the ops endpoints, the SPA catch-all not shadowing `/api`, export
 filtering across all three formats, and `group_id`-sourced changelogs.
 
-### ⬜ Phase 3 — The product (PENDING)
+### ✅ Phase 3 — The product (COMPLETE)
 
-- [ ] L1 — Real git merge engine (`git merge-tree`)
-- [ ] L2 — Workspace as candidate build
-- [ ] L3 — Release-readiness gate
+Goal: make the app actually do what it claims — merge PRs and report what breaks.
 
-Nothing else in the large list should precede these. **Acceptance test for L1:** seed a
-scratch repo with two genuinely conflicting branches and verify the generated `.patch`
-passes `git apply --check` — the current implementation fails this, which is the cleanest
-single proof the engine landed.
+#### L1 — Real git merge engine
 
-### ⬜ Phase 4 — Scale & adoption (PENDING)
+`backend/services/git_service.py`. Maintains a bare mirror clone per repo
+(`git clone --bare --filter=blob:none`, incremental fetch behind a TTL) and merges with
+**`git merge-tree --write-tree`**, which performs a full merge in the object database —
+no working tree, no checkout, no index.
 
-- [ ] L4 — Webhooks, background sync, SSE
-- [ ] L5 — Async job queue for AI ops
-- [ ] L6 — Write-back to GitHub
-- [ ] L7 — PR dependency / stacked-PR graph
-- [ ] L8 — Multi-tenancy, auth, migrations
+- PR heads are fetched from `refs/pull/*/head`, so PRs from forks work without adding remotes.
+- `GITHUB_TOKEN` is now a real setting; when unset it falls back to `gh auth token`, so
+  existing `gh auth login` installs keep working.
+- Conflict markers are extracted from the merged tree and handed to the AI resolver, which
+  previously reasoned over a truncated slice of the PR diff that **never contained the
+  conflict at all** — it was inferring one.
+
+Two non-obvious things this required, both found by testing rather than assumption:
+
+1. **`merge-tree` rejects a bare tree** ("expected commit type"). Sequential simulation
+   therefore commits each intermediate result with `git commit-tree`, which also gives the
+   accumulated build correct ancestry — exactly what a real merge queue does.
+2. **A bad ref and a real conflict both exit 1**, so the exit code alone cannot tell a
+   typo'd branch from a genuine collision. Both refs are now validated up front.
+
+#### L2 — Workspace as candidate build
+
+`backend/services/build_service.py` + `POST /api/build/simulate`, rendered by
+`BuildPanel.jsx` on the Workspaces tab.
+
+- **Cumulative simulation** — merges the set one PR at a time onto the base and reports
+  which PR breaks the accumulated build.
+- **Pairwise conflict matrix** — every unordered pair merged against each other, so the
+  report names *which two PRs* collide and on which files. Capped by
+  `GIT_MAX_PAIRWISE_PRS` (O(n²) merges), and the UI says when it was skipped.
+- **Suggested merge order** — sorted by conflict degree, least-entangled first, so most of
+  the set can land before the tangled remainder is resolved. Deliberately *not* a
+  topological sort: conflict pairs are undirected, so there is no true dependency order.
+- Simulation is per-repository; merging PRs from different repos into one tree is meaningless.
+
+#### L3 — Release-readiness gate
+
+`gh pr list --json` now requests `statusCheckRollup`, `reviewDecision`, `reviewRequests`,
+and `assignees` — none of which were previously fetched, so the app was blind to CI and
+approvals, the two things that actually gate a release.
+
+`POST /api/build/readiness` returns ship blockers in one verdict: failing CI (naming the
+checks), changes requested, awaiting approval, still-draft, and PRs that fail the merge
+simulation. Pending CI is a *warning*, not a blocker — it may still go green. A
+`shippable_with_review` flag distinguishes "only approvals outstanding" from "the build is
+broken." `CIBadge` surfaces per-PR state in both the matrix and the workspace table.
+
+#### Acceptance test — passed
+
+The stated proof was that a generated `.patch` must pass `git apply --check`; the old
+implementation emitted LLM prose that `git apply` rejected outright. Verified end-to-end
+against a scratch repo:
+
+```
+each-into-main mergeable: [True, True, True]   <-- what the old app showed
+SET clean: False  merged: ['#1', '#3']  blocked: ['#2']
+colliding pair: [('#1', '#2', ['shared.txt'])]
+suggested order: ['#3', '#1', '#2']
+GIT_APPLY_CHECK = OK
+```
+
+That first line is the whole point: three PRs that are each individually mergeable into
+`main`, which the app previously reported as three green rows, do **not** merge as a set.
+
+**Verification:** backend `46 passed`, frontend `45 passed` across 12 files,
+`run_tests.py` clean, build clean. `test_git_service.py` builds real repositories on disk
+and runs real merges — deliberately unmocked, since the whole defect being fixed was that
+conflict detection never executed git.
+
+### ✅ Phase 4 — Scale & adoption (COMPLETE)
+
+Goal: stop being a read-only, manually-refreshed single-user tool.
+
+#### L4 — Event-driven freshness
+
+`services/event_bus.py`, `services/sync_service.py`, `routers/events.py`.
+
+- **HMAC-verified webhooks** at `POST /api/webhooks/github`. Irrelevant events return
+  **200, not 4xx** — GitHub retries failures, and we are not interested in `star`.
+  Signature comparison is constant-time; `==` on a secret leaks it byte by byte.
+- **SSE** at `GET /api/events`. Chosen over websockets because every message is
+  server→client. A full subscriber queue **drops** rather than blocks — a stalled browser
+  tab must never stall a webhook delivery.
+- **Background reconciliation loop** (`SYNC_INTERVAL_SECONDS`, 0 = off) owned by a FastAPI
+  `lifespan`, which the app previously had no equivalent of, so there was nowhere to cancel
+  background work on reload.
+- The header now shows a **live/offline dot**, so "nothing changed" is distinguishable from
+  "the stream is down".
+
+#### L5 — Async job queue for AI ops
+
+`services/job_service.py` + `routers/jobs.py`. Batch review is queued and returns
+immediately, with live progress, per-PR errors, and **cooperative** cancellation (checked
+between PRs, so an in-flight LLM call is not abandoned half-written). Blocking calls run via
+`asyncio.to_thread` so SSE and the API stay responsive.
+
+The old blocking version also **never refreshed after finishing**, so results stayed
+invisible until a manual sync; the SSE handler now reloads on completion.
+
+#### L6 — Write-back to GitHub
+
+`services/writeback_service.py` + `routers/writeback.py`. Post AI reviews as comments, sync
+tags to labels, and merge a workspace in the computed order. `merge_sequence` is **dry-run
+by default** and **aborts at the first failure** — once one merge fails, every later merge
+targets a base the simulation never modelled.
+
+#### L7 — Stacked-PR dependency graph
+
+`services/dependency_service.py` + `routers/dependencies.py`. Two independent signals:
+explicit base-branch targeting, and **commit ancestry** (which survives a retarget onto
+`main`, where the explicit signal is lost).
+
+Produces a genuinely **topological** merge order — unlike L2's degree-based ordering, a
+stack edge is directed, so merging a child before its parent is simply wrong. Also filters
+stack false positives out of the Collision Matrix: a stacked PR necessarily touches its
+parent's files, which was the largest source of noise there.
+
+#### L8 — Auth (partial)
+
+`services/auth_service.py`. Optional shared-secret API key, **disabled by default** so
+existing installs are unaffected. `/health`, `/api/version`, and the webhook route stay
+open — probes must work, and GitHub cannot send a custom header (it authenticates with its
+own HMAC instead).
+
+**Deliberately not done:** per-user GitHub OAuth, workspace ownership, and Alembic
+migrations. A shared secret closes the "anyone on the LAN can drive this" hole; real
+multi-tenancy needs a user model, and inventing half a login flow would be worse than
+either option. See *Remaining work* below.
+
+#### Two bugs caught by testing, not by reading
+
+1. **`POST /api/jobs/analyze` was a sync `def`**, so FastAPI ran it in a threadpool where
+   there is no running event loop and `asyncio.create_task` raises. This would have failed
+   in production exactly as it failed in the test.
+2. **Test pollution surfaced only in the full-suite run.** A partial PR fixture in
+   `test_phase4.py` entered the shared `_prs_cache`, and `GET /api/prs` validates every
+   entry against `PRSummaryItem` — so an unrelated test failed later in the run while
+   `pytest backend/tests/test_phase4.py` alone stayed green.
+
+**Verification:** backend `66 passed`, frontend `56 passed` across 14 files,
+`run_tests.py` clean, build clean.
 
 ---
 
@@ -219,15 +353,67 @@ python run_tests.py                    # unified runner
 cd frontend && npm run build           # production build
 ```
 
+Current totals: backend **66 passed**, frontend **56 passed** across 14 files.
+
+## Remaining work
+
+Everything in the original roadmap is done except these, all deliberately deferred:
+
+- **L8 (rest)** — per-user GitHub OAuth, workspace ownership/sharing, Alembic migrations,
+  Postgres path. Needs a real user model; a shared secret already closes the open-network hole.
+- **Multi-worker deployment** — `_prs_cache`, the event bus, and the job queue are all
+  per-process. Correct for the current single-worker setup; a second worker needs Redis
+  pub/sub and a durable queue behind the same interfaces.
+- **Cost/token accounting** for AI calls (listed under L5 originally, not built).
+- **Shared-symbol coupling** in the dependency graph (L7 detects branch and ancestry
+  relationships, not "these PRs both change this exported function").
+
 Frontend suites still missing: `App`, `WorkspaceModal`, `ConflictMap`,
 `ConflictResolverModal`, `RepoManagerModal`, `TopHeader`, `Modal`. `TopHeader` and `App`
 search are the highest-value additions given the bugs Phase 1 found in both; `Modal`'s
 focus trap and the URL-state hook are the highest-value additions from Phase 2.
 
-Manual checks worth doing before Phase 3, since they are not covered by tests:
-- Open a PR, press **Back** — the drawer should close rather than leaving the app.
-- Reload with `?tab=workspaces&repo=<owner/repo>` — state should be restored.
-- Shift-click two rows in the matrix — the whole range should select.
-- Press **?** — the shortcuts overlay should open, and **Esc** should close it.
-- Deep-link to any non-`/api` path against the built frontend — it should serve the app,
-  not a 404.
+### ✅ Manual verification — Phase 2 (2026-08-09)
+
+All five behaviors that tests did not cover were verified against the **built production
+frontend** served same-origin by FastAPI, driven through a real browser with 15 real open
+PRs from `cli/cli`:
+
+| Behavior | Result |
+|---|---|
+| Back closes the drawer (does not exit the app) | ✅ `history.length` 4→5 on open; Back reverted the URL and kept the app mounted |
+| `?tab=workspaces&repo=cli/cli` restores state | ✅ tab active, repo selector set |
+| Shift-click selects a contiguous range | ✅ 4 rows selected, bulk bar showed "4 selected" |
+| `?` opens the shortcuts overlay, Esc closes it | ✅ `role="dialog"`, `aria-modal`, focus trapped and restored |
+| Deep link against the built frontend | ✅ deep path → 200 (`index.html`); `/api/nonexistent` → 404 |
+
+No console errors. Noted as intended behavior, not a bug: `?` does nothing while focus is
+in a text field, because the shortcut handler deliberately ignores `input`/`textarea`/
+`select`.
+
+### Manual checks for Phase 4 (not covered by tests)
+
+Needs a live GitHub repo and a public tunnel:
+
+- Point a real GitHub webhook at `/api/webhooks/github` with `GITHUB_WEBHOOK_SECRET` set;
+  push to a PR and confirm the matrix updates **without a manual sync**.
+- Watch the header dot go offline when the backend restarts, and back to live on reconnect.
+- Queue a batch AI review over 10+ PRs and confirm progress streams, then cancel mid-run.
+- Post an AI review to a real PR and confirm the markdown renders correctly on GitHub.
+- Run `merge-sequence` with `dry_run: true`, confirm nothing merges, then verify the abort
+  behavior on a set where the second PR cannot merge.
+- Set `API_KEY` and confirm the SPA still loads while `/api/*` returns 401 without the key.
+
+### Manual checks for Phase 3 (not covered by tests)
+
+The merge engine is covered by real on-disk git tests, but these need a live repo:
+
+- Run a build simulation on a workspace whose PRs genuinely conflict — the panel should
+  name the colliding pair and the file.
+- Download the patch from a clean simulation and confirm `git apply --check` accepts it
+  against the real base branch.
+- Confirm the first simulation on a large repo clones the mirror (slow) and the second is
+  fast (fetch inside `GIT_FETCH_TTL`).
+- Point at a PR from a **fork** — it should still merge, via `refs/pull/*/head`.
+- Set `GIT_MERGE_ENABLED=false` and confirm the panel explains itself rather than silently
+  reporting "no conflicts".

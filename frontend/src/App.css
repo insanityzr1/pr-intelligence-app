@@ -669,6 +669,83 @@ td {
   border: 0;
 }
 
+/* ---- Live connection indicator ---- */
+.live-dot {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 0.6rem;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+.live-dot.live { color: #34d399; }
+.live-dot.offline { color: var(--text-secondary); opacity: 0.5; }
+.live-dot.live span[aria-hidden] { animation: live-pulse 2.4s ease-in-out infinite; }
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* ---- Async job progress ---- */
+.job-progress {
+  margin-bottom: 0.85rem;
+  padding: 0.6rem 0.8rem;
+  background-color: rgba(99, 102, 241, 0.1);
+  border: 1px solid var(--accent-color);
+  border-radius: 0.5rem;
+  font-size: 0.8125rem;
+}
+.job-progress.job-completed_with_errors,
+.job-progress.job-failed { border-color: #b91c1c; background-color: rgba(185, 28, 28, 0.1); }
+.job-progress.job-done { border-color: #047857; background-color: rgba(4, 120, 87, 0.1); }
+.job-progress.job-cancelled { border-color: var(--border-color); background-color: rgba(148, 163, 184, 0.1); }
+
+.job-progress-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.4rem;
+}
+.job-label { font-weight: 600; }
+.job-counts { margin-left: auto; font-family: monospace; }
+.job-failed { color: var(--badge-red-txt); }
+
+.job-bar {
+  height: 5px;
+  background-color: rgba(2, 6, 23, 0.7);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.job-bar-fill {
+  height: 100%;
+  background-color: var(--accent-color);
+  border-radius: 999px;
+  transition: width 220ms ease-out;
+}
+.job-done .job-bar-fill { background-color: #047857; }
+.job-completed_with_errors .job-bar-fill,
+.job-failed .job-bar-fill { background-color: #b91c1c; }
+
+.job-errors {
+  margin-top: 0.45rem;
+  padding-left: 1.1rem;
+  font-size: 0.775rem;
+  color: var(--badge-red-txt);
+}
+
+/* ---- Stacked-PR indicator ---- */
+.stack-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  margin-left: 0.375rem;
+  padding: 0.05rem 0.35rem;
+  font-size: 0.7rem;
+  background-color: rgba(99, 102, 241, 0.2);
+  border: 1px solid var(--accent-color);
+  border-radius: 0.25rem;
+}
+
 /* ---- CI / review badges ---- */
 .ci-badge-group { display: inline-flex; gap: 0.25rem; margin-left: 0.375rem; vertical-align: middle; }
 .ci-badge {
