@@ -3,7 +3,7 @@ import { fetchPRDetail, analyzePRs, fetchPRChatHistory, postPRChatMessage, fetch
 import FormattedMarkdown from './FormattedMarkdown';
 import PRTagBar from './PRTagBar';
 
-export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveConflict }) {
+export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveConflict, addToast }) {
   const [activeTab, setActiveTab] = useState('overview');
   const [pr, setPr] = useState(null);
   const [activeTags, setActiveTags] = useState([]);
@@ -14,6 +14,13 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
   const [chatHistory, setChatHistory] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [sendingChat, setSendingChat] = useState(false);
+
+  const quickPrompts = [
+    "Explain breaking changes",
+    "Summarize security risks",
+    "Draft a release changelog note",
+    "Suggest regression test scenarios"
+  ];
 
   useEffect(() => {
     document.body.style.overflow = 'hidden';
@@ -34,6 +41,7 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
       setPr(data);
     } catch (err) {
       console.error(err);
+      if (addToast) addToast('Failed to load PR details', 'error');
     } finally {
       setLoading(false);
     }
@@ -64,33 +72,45 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
     try {
       await analyzePRs([prNumber], true, repoName);
       await loadDetail();
+      if (addToast) addToast('AI Review regenerated successfully!', 'success');
     } catch (err) {
       console.error(err);
+      if (addToast) addToast('AI Analysis failed', 'error');
     } finally {
       setAnalyzing(false);
     }
   }
 
-  async function handleSendChat(e) {
-    e.preventDefault();
-    if (!chatInput.trim() || sendingChat) return;
-    const msg = chatInput.trim();
+  async function handleSendChat(e, promptText) {
+    if (e) e.preventDefault();
+    const query = promptText || chatInput.trim();
+    if (!query || sendingChat) return;
     setChatInput('');
     setSendingChat(true);
 
-    setChatHistory(prev => [...prev, { role: 'user', message: msg, created_at: 'Just now' }]);
+    setChatHistory(prev => [...prev, { role: 'user', message: query, created_at: 'Just now' }]);
 
     try {
-      const res = await postPRChatMessage(prNumber, msg, repoName);
+      const res = await postPRChatMessage(prNumber, query, repoName);
       setChatHistory(res.history || []);
     } catch (err) {
       console.error(err);
+      if (addToast) addToast('Failed to send AI chat message', 'error');
     } finally {
       setSendingChat(false);
     }
   }
 
+  function copyToClipboard(text, label) {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    if (addToast) addToast(`Copied ${label} to clipboard!`, 'success');
+  }
+
   if (!prNumber) return null;
+
+  const score = pr?.ai_review?.code_quality_score ?? 0;
+  const scoreClass = score >= 80 ? 'score-high' : score >= 60 ? 'score-med' : 'score-low';
 
   return (
     <div className="drawer-backdrop modal-backdrop-center" onClick={onClose}>
@@ -150,9 +170,30 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
               <div className="overview-col-left">
                 {pr.ai_review ? (
                   <div className="ai-review-card">
-                    <div className="score-inline">
-                      <span className="score-label">Code Quality Score:</span>
-                      <strong className="score-badge-val">{pr.ai_review.code_quality_score} / 100</strong>
+                    {/* Visual Code Quality Score Ring/Meter */}
+                    <div className="score-meter-container">
+                      <div className="score-meter-header">
+                        <span className="score-label">Code Quality Rating</span>
+                        <button
+                          onClick={() => copyToClipboard(pr.ai_review.ai_summary, 'AI Synthesis')}
+                          className="btn-copy-sm"
+                          title="Copy AI Summary"
+                        >
+                          📋 Copy Summary
+                        </button>
+                      </div>
+                      <div className="score-gauge-bar">
+                        <div
+                          className={`score-gauge-fill ${scoreClass}`}
+                          style={{ width: `${Math.min(100, Math.max(0, score))}%` }}
+                        />
+                      </div>
+                      <div className="score-meter-footer">
+                        <span className="score-val-large">{score} / 100</span>
+                        <span className="score-health-tag">
+                          {score >= 80 ? '🟢 Excellent' : score >= 60 ? '🟡 Moderate Risk' : '🔴 High Alert'}
+                        </span>
+                      </div>
                     </div>
 
                     {/* Compact Callouts */}
@@ -183,7 +224,16 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
                     </div>
 
                     <div className="section-block">
-                      <h4 className="section-title">🧪 Generated QA Scenarios</h4>
+                      <div className="section-title-row">
+                        <h4 className="section-title">🧪 Generated QA Scenarios</h4>
+                        <button
+                          onClick={() => copyToClipboard(pr.ai_review.qa_test_scenarios?.join('\n'), 'QA Scenarios')}
+                          className="btn-copy-xs"
+                          title="Copy QA Scenarios"
+                        >
+                          📋 Copy Tests
+                        </button>
+                      </div>
                       <ul className="qa-compact-list">
                         {pr.ai_review.qa_test_scenarios?.map((t, i) => <li key={i}>{t}</li>)}
                       </ul>
@@ -216,6 +266,21 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
         ) : (
           /* Interactive Chat Tab */
           <div className="drawer-body chat-tab-body">
+            {/* Quick Prompt Suggestion Pills */}
+            <div className="quick-prompts-bar">
+              <span className="quick-prompt-label">Quick Prompts:</span>
+              {quickPrompts.map((qp, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => handleSendChat(null, qp)}
+                  className="quick-prompt-pill"
+                  disabled={sendingChat}
+                >
+                  💡 {qp}
+                </button>
+              ))}
+            </div>
+
             <div className="chat-stream">
               {chatHistory.length === 0 ? (
                 <div className="empty-box">No chat history yet. Ask the AI assistant anything about PR #{prNumber}!</div>

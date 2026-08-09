@@ -6,7 +6,8 @@ export default function TopHeader({
   prs = [],
   onMobileMenuToggle,
   searchQuery,
-  setSearchQuery
+  setSearchQuery,
+  onOpenShortcuts
 }) {
   const getTabDetails = (tab) => {
     switch (tab) {
@@ -27,9 +28,9 @@ export default function TopHeader({
 
   // Compute inline KPI stats
   const totalCount = prs.length;
-  const conflictCount = prs.filter(p => (p.conflicts_count || p.has_conflicts || p.conflicting_files?.length > 0)).length;
-  const highRiskCount = prs.filter(p => p.risk_level === 'HIGH' || p.risk_level === 'CRITICAL').length;
-  const readyCount = prs.filter(p => p.risk_level === 'LOW' && (!p.conflicts_count || p.conflicts_count === 0)).length;
+  const conflictCount = prs.filter(p => (p.conflicts_count || p.has_conflicts || p.conflicting_files?.length > 0 || p.mergeable === 'CONFLICTING')).length;
+  const highRiskCount = prs.filter(p => p.risk === 'High' || p.risk_level === 'HIGH' || p.risk_level === 'CRITICAL').length;
+  const readyCount = prs.filter(p => (p.risk === 'Low' || p.risk_level === 'LOW') && (p.mergeable === 'MERGEABLE' || (!p.conflicts_count || p.conflicts_count === 0))).length;
 
   return (
     <header className="top-header">
@@ -102,6 +103,16 @@ export default function TopHeader({
             <span className="kpi-label">Clean</span>
             <span className="kpi-val">{readyCount}</span>
           </div>
+
+          {onOpenShortcuts && (
+            <button
+              onClick={onOpenShortcuts}
+              className="top-header-shortcuts-btn"
+              title="Keyboard Shortcuts (?)"
+            >
+              ⌨️ <span className="kbd-hint">?</span>
+            </button>
+          )}
         </div>
       </div>
     </header>

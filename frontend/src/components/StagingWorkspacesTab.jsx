@@ -3,7 +3,7 @@ import { fetchGroups, createGroup, updateGroup, deleteGroup, fetchGroupItems, ad
 import FormattedMarkdown from './FormattedMarkdown';
 import WorkspaceModal from './WorkspaceModal';
 
-export default function StagingWorkspacesTab({ prs, onSelectPr }) {
+export default function StagingWorkspacesTab({ prs, onSelectPr, addToast }) {
   const [groups, setGroups] = useState([]);
   const [activeGroupId, setActiveGroupId] = useState(null);
   const [activeItems, setActiveItems] = useState([]);
@@ -47,6 +47,7 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
       }
     } catch (err) {
       console.error(err);
+      if (addToast) addToast('Failed to load workspaces', 'error');
     }
   }
 
@@ -79,8 +80,10 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
         setActiveGroupId(null);
         setActiveItems([]);
       }
+      if (addToast) addToast('Workspace deleted', 'info');
     } catch (err) {
       console.error(err);
+      if (addToast) addToast('Failed to delete workspace', 'error');
     }
   }
 
@@ -90,8 +93,10 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
       await removePrFromGroup(activeGroupId, prNum, repoName);
       await loadGroupItems(activeGroupId);
       await loadGroups();
+      if (addToast) addToast(`PR #${prNum} removed from workspace`, 'info');
     } catch (err) {
       console.error(err);
+      if (addToast) addToast('Failed to remove PR from workspace', 'error');
     }
   }
 
@@ -126,6 +131,7 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
           const prObj = prs.find(p => (p.number ?? p.pr_number) === rNum);
           await removePrFromGroup(group_id, rNum, prObj?.repo_name || 'rpnunez/wp-ai-scheduler');
         }
+        if (addToast) addToast(`Updated workspace '${name}'`, 'success');
       } else {
         // Create new group
         const res = await createGroup(name, description);
@@ -143,6 +149,7 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
             await addPrsToGroup(targetGId, nums, repo);
           }
         }
+        if (addToast) addToast(`Created workspace '${name}'`, 'success');
       }
 
       await loadGroups();
@@ -152,6 +159,7 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
       }
     } catch (err) {
       console.error(err);
+      if (addToast) addToast('Failed to save workspace', 'error');
       throw err;
     }
   }
@@ -162,9 +170,12 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
     const prNums = activeItems.map(i => i.pr_number);
     try {
       await analyzePRs(prNums, true);
-      alert(`Batch AI Analysis complete for ${prNums.length} PRs in this workspace!`);
+      if (addToast) {
+        addToast(`Batch AI Analysis complete for ${prNums.length} PRs in this workspace!`, 'success');
+      }
     } catch (err) {
       console.error(err);
+      if (addToast) addToast('Batch AI Analysis failed', 'error');
     } finally {
       setBatchAnalyzing(false);
     }

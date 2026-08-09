@@ -21,7 +21,9 @@ export default function PRCommandBar({
   currStatuses = [],
   risks = [],
   actions = [],
-  clearAllFilters
+  clearAllFilters,
+  viewMode = 'table',
+  setViewMode
 }) {
   const [showPopover, setShowPopover] = useState(false);
   const popoverRef = useRef(null);
@@ -117,8 +119,27 @@ export default function PRCommandBar({
         )}
       </div>
 
-      {/* Right Controls: More Filters Popover & Clear All */}
+      {/* Right Controls: View Switcher, More Filters Popover & Clear All */}
       <div className="command-actions-group" ref={popoverRef}>
+        {setViewMode && (
+          <div className="view-mode-toggle" title="Switch PR display mode">
+            <button
+              className={`view-toggle-btn ${viewMode === 'table' ? 'active' : ''}`}
+              onClick={() => setViewMode('table')}
+              title="Table View"
+            >
+              📋
+            </button>
+            <button
+              className={`view-toggle-btn ${viewMode === 'cards' ? 'active' : ''}`}
+              onClick={() => setViewMode('cards')}
+              title="Card Grid View"
+            >
+              🎴
+            </button>
+          </div>
+        )}
+
         <button
           className={`btn-popover-toggle ${showPopover || activeDropdownCount > 0 ? 'active' : ''}`}
           onClick={() => setShowPopover(!showPopover)}
