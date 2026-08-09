@@ -11,6 +11,7 @@ export default function Sidebar({
   selectedRepo,
   setSelectedRepo,
   onManageRepos,
+  onOpenShortcuts,
   handleSync,
   syncing
 }) {
@@ -172,6 +173,15 @@ export default function Sidebar({
             <span className="export-icon">📥</span>
             {!isCollapsed && <span>Export CSV</span>}
           </a>
+
+          <button
+            onClick={onOpenShortcuts}
+            className="sidebar-shortcuts-btn"
+            title="Keyboard Shortcuts (?)"
+          >
+            <span className="shortcuts-icon">⌨️</span>
+            {!isCollapsed && <span>Shortcuts (?)</span>}
+          </button>
         </div>
       </aside>
     </>

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { fetchTagsMap } from '../api/client';
 import PRCommandBar from './PRCommandBar';
 
-export default function PRMatrix({ prs, onSelectPr }) {
+export default function PRMatrix({ prs, onSelectPr, addToast }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
@@ -11,6 +11,9 @@ export default function PRMatrix({ prs, onSelectPr }) {
   const [riskFilter, setRiskFilter] = useState('');
   const [actionFilter, setActionFilter] = useState('');
   const [tagFilter, setTagFilter] = useState('');
+
+  // Layout Display View Mode: 'table' or 'cards'
+  const [viewMode, setViewMode] = useState('table');
 
   // Interactive KPI Multi-Select Filters
   const [activeKpis, setActiveKpis] = useState({
@@ -63,6 +66,7 @@ export default function PRMatrix({ prs, onSelectPr }) {
     setActionFilter('');
     setTagFilter('');
     resetKpis();
+    if (addToast) addToast('All filters reset', 'info');
   }
 
   const statuses = Array.from(new Set(prs.map(p => p.status))).sort();
@@ -126,7 +130,7 @@ export default function PRMatrix({ prs, onSelectPr }) {
 
   return (
     <div className="matrix-wrapper">
-      {/* Condensed PR Command Bar (KPI Stat Chips + Search + Popover Filters) */}
+      {/* Condensed PR Command Bar (KPI Stat Chips + Search + View Switcher + Popover Filters) */}
       <PRCommandBar
         prs={prs}
         search={search}
@@ -149,97 +153,149 @@ export default function PRMatrix({ prs, onSelectPr }) {
         risks={risks}
         actions={actions}
         clearAllFilters={clearAllFilters}
+        viewMode={viewMode}
+        setViewMode={setViewMode}
       />
 
-      <div className="table-container">
-        <table>
-          <thead>
-            <tr>
-              <th onClick={() => handleSort('number')} className="sortable">
-                PR ID {sortKey === 'number' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
-              </th>
-              <th onClick={() => handleSort('updated_at')} className="sortable">
-                Last Updated {sortKey === 'updated_at' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
-              </th>
-              <th onClick={() => handleSort('title')} className="sortable">
-                Title, Flags & Summary {sortKey === 'title' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
-              </th>
-              <th onClick={() => handleSort('status')} className="sortable">
-                Status {sortKey === 'status' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
-              </th>
-              <th onClick={() => handleSort('type')} className="sortable">
-                Type {sortKey === 'type' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
-              </th>
-              <th onClick={() => handleSort('subtype')} className="sortable">
-                Subtype {sortKey === 'subtype' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
-              </th>
-              <th onClick={() => handleSort('current_status')} className="sortable">
-                Current Status {sortKey === 'current_status' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
-              </th>
-              <th onClick={() => handleSort('risk_score')} className="sortable">
-                Risk {sortKey === 'risk_score' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
-              </th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.length === 0 ? (
-              <tr>
-                <td colSpan="9" className="no-data">
-                  No Pull Requests match the selected filters.
-                </td>
-              </tr>
-            ) : (
-              sorted.map(pr => {
-                const key = `${pr.repo_name}#${pr.number}`;
-                const prTags = tagsMap[key] || [];
+      {viewMode === 'cards' ? (
+        /* Glassmorphic Card Grid View */
+        <div className="pr-cards-grid">
+          {sorted.length === 0 ? (
+            <div className="empty-box card-empty">No Pull Requests match the selected filters.</div>
+          ) : (
+            sorted.map(pr => {
+              const key = `${pr.repo_name}#${pr.number}`;
+              const prTags = tagsMap[key] || [];
 
-                return (
-                  <tr key={key} onClick={() => onSelectPr(pr.number)} className="pr-row">
-                    <td className="pr-id-cell">
-                      <span className="pr-num">PR #{pr.number}</span>
+              return (
+                <div key={key} className="pr-glass-card" onClick={() => onSelectPr(pr.number)}>
+                  <div className="card-top-row">
+                    <div className="card-pr-id">
+                      <span className="pr-num">#{pr.number}</span>
                       {pr.repo_name && <span className="repo-badge">{pr.repo_name}</span>}
-                    </td>
-                    <td className="updated-cell">{pr.updated_at_human}</td>
-                    <td className="title-summary-cell">
-                      <div className="pr-title-row">
-                        <span className="pr-title">{pr.title}</span>
-                      </div>
-                      {prTags.length > 0 && (
-                        <div className="pr-tags-list">
-                          {prTags.map(tag => (
-                            <span key={tag} className="pr-tag-pill">🏷️ {tag}</span>
-                          ))}
+                    </div>
+                    <span className={`risk-badge ${pr.risk.toLowerCase()}`}>
+                      {pr.risk_desc || pr.risk} Risk
+                    </span>
+                  </div>
+
+                  <h3 className="card-pr-title">{pr.title}</h3>
+                  <p className="card-pr-summary">{pr.summary}</p>
+
+                  {prTags.length > 0 && (
+                    <div className="pr-tags-list card-tags">
+                      {prTags.map(tag => (
+                        <span key={tag} className="pr-tag-pill">🏷️ {tag}</span>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="card-meta-row">
+                    <span className="card-author">👤 @{pr.author}</span>
+                    <span className={`status-badge ${pr.status.toLowerCase()}`}>{pr.status}</span>
+                  </div>
+
+                  <div className="card-footer-row">
+                    <span className="card-action-label">Action: {pr.rec_action}</span>
+                    <span className="card-updated">🕒 {pr.updated_at_human}</span>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      ) : (
+        /* Table View */
+        <div className="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th onClick={() => handleSort('number')} className="sortable">
+                  PR ID {sortKey === 'number' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+                </th>
+                <th onClick={() => handleSort('updated_at')} className="sortable">
+                  Last Updated {sortKey === 'updated_at' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+                </th>
+                <th onClick={() => handleSort('title')} className="sortable">
+                  Title, Flags & Summary {sortKey === 'title' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+                </th>
+                <th onClick={() => handleSort('status')} className="sortable">
+                  Status {sortKey === 'status' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+                </th>
+                <th onClick={() => handleSort('type')} className="sortable">
+                  Type {sortKey === 'type' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+                </th>
+                <th onClick={() => handleSort('subtype')} className="sortable">
+                  Subtype {sortKey === 'subtype' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+                </th>
+                <th onClick={() => handleSort('current_status')} className="sortable">
+                  Current Status {sortKey === 'current_status' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+                </th>
+                <th onClick={() => handleSort('risk_score')} className="sortable">
+                  Risk {sortKey === 'risk_score' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+                </th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.length === 0 ? (
+                <tr>
+                  <td colSpan="9" className="no-data">
+                    No Pull Requests match the selected filters.
+                  </td>
+                </tr>
+              ) : (
+                sorted.map(pr => {
+                  const key = `${pr.repo_name}#${pr.number}`;
+                  const prTags = tagsMap[key] || [];
+
+                  return (
+                    <tr key={key} onClick={() => onSelectPr(pr.number)} className="pr-row">
+                      <td className="pr-id-cell">
+                        <span className="pr-num">PR #{pr.number}</span>
+                        {pr.repo_name && <span className="repo-badge">{pr.repo_name}</span>}
+                      </td>
+                      <td className="updated-cell">{pr.updated_at_human}</td>
+                      <td className="title-summary-cell">
+                        <div className="pr-title-row">
+                          <span className="pr-title">{pr.title}</span>
                         </div>
-                      )}
-                      <div className="pr-summary">{pr.summary}</div>
-                      <div className="pr-author-meta">Created: {pr.created_at_human}</div>
-                    </td>
-                    <td>
-                      <span className={`status-badge ${pr.status.toLowerCase()}`}>{pr.status}</span>
-                    </td>
-                    <td>{pr.type}</td>
-                    <td>{pr.subtype}</td>
-                    <td>
-                      <span className={`curr-status-badge ${pr.current_status.toLowerCase().replace(/\s+/g, '-')}`}>
-                        {pr.current_status}
-                      </span>
-                    </td>
-                    <td>
-                      <span className={`risk-badge ${pr.risk.toLowerCase()}`}>
-                        {pr.risk_desc || pr.risk}
-                      </span>
-                    </td>
-                    <td className="action-cell">
-                      <span className="action-label">{pr.rec_action}</span>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+                        {prTags.length > 0 && (
+                          <div className="pr-tags-list">
+                            {prTags.map(tag => (
+                              <span key={tag} className="pr-tag-pill">🏷️ {tag}</span>
+                            ))}
+                          </div>
+                        )}
+                        <div className="pr-summary">{pr.summary}</div>
+                        <div className="pr-author-meta">Created: {pr.created_at_human}</div>
+                      </td>
+                      <td>
+                        <span className={`status-badge ${pr.status.toLowerCase()}`}>{pr.status}</span>
+                      </td>
+                      <td>{pr.type}</td>
+                      <td>{pr.subtype}</td>
+                      <td>
+                        <span className={`curr-status-badge ${pr.current_status.toLowerCase().replace(/\s+/g, '-')}`}>
+                          {pr.current_status}
+                        </span>
+                      </td>
+                      <td>
+                        <span className={`risk-badge ${pr.risk.toLowerCase()}`}>
+                          {pr.risk_desc || pr.risk}
+                        </span>
+                      </td>
+                      <td className="action-cell">
+                        <span className="action-label">{pr.rec_action}</span>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

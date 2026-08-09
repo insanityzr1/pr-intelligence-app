@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { generateChangelog, fetchChangelogs, deleteChangelog, fetchGroups, fetchGroupItems, createGroup } from '../api/client';
 import FormattedMarkdown from './FormattedMarkdown';
 
-export default function ReleaseBuilder({ prs }) {
+export default function ReleaseBuilder({ prs, addToast }) {
   const [groups, setGroups] = useState([]);
   const [activeGroupId, setActiveGroupId] = useState(null);
   const [activeItems, setActiveItems] = useState([]);
@@ -40,6 +40,7 @@ export default function ReleaseBuilder({ prs }) {
       }
     } catch (err) {
       console.error(err);
+      if (addToast) addToast('Failed to load workspaces', 'error');
     }
   }
 
@@ -72,8 +73,10 @@ export default function ReleaseBuilder({ prs }) {
       if (res.group?.group_id) {
         setActiveGroupId(res.group.group_id);
       }
+      if (addToast) addToast(`Workspace '${newGroupName}' created!`, 'success');
     } catch (err) {
       console.error(err);
+      if (addToast) addToast('Failed to create workspace', 'error');
     } finally {
       setCreatingGroup(false);
     }
@@ -92,8 +95,10 @@ export default function ReleaseBuilder({ prs }) {
       setCurrentChangelog(data);
       setActiveChangelogId(data.id || null);
       await loadChangelogs();
+      if (addToast) addToast(`Release notes generated for ${prNums.length} PRs!`, 'success');
     } catch (err) {
       console.error(err);
+      if (addToast) addToast('Changelog generation failed', 'error');
     } finally {
       setLoading(false);
     }
@@ -113,9 +118,32 @@ export default function ReleaseBuilder({ prs }) {
         setActiveChangelogId(null);
         setCurrentChangelog(null);
       }
+      if (addToast) addToast('Deleted changelog', 'info');
     } catch (err) {
       console.error(err);
+      if (addToast) addToast('Failed to delete changelog', 'error');
     }
+  }
+
+  function copyMarkdownContent() {
+    const md = currentChangelog?.markdown || currentChangelog?.changelog || '';
+    if (!md) return;
+    navigator.clipboard.writeText(md);
+    if (addToast) addToast('Release notes copied to clipboard!', 'success');
+  }
+
+  function downloadMarkdownFile() {
+    const md = currentChangelog?.markdown || currentChangelog?.changelog || '';
+    if (!md) return;
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `CHANGELOG-${activeGroup?.name || 'RELEASE'}.md`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    if (addToast) addToast('Downloaded CHANGELOG.md', 'success');
   }
 
   return (
@@ -247,7 +275,20 @@ export default function ReleaseBuilder({ prs }) {
 
         {/* Col 3: Generated Release Output Viewer */}
         <div className="changelog-output">
-          <h3>Generated Release Draft Output</h3>
+          <div className="changelog-output-header">
+            <h3>Generated Release Draft Output</h3>
+            {currentChangelog && (
+              <div className="export-action-btns">
+                <button onClick={copyMarkdownContent} className="btn btn-secondary btn-sm">
+                  📋 Copy Markdown
+                </button>
+                <button onClick={downloadMarkdownFile} className="btn btn-primary btn-sm">
+                  📥 Download .md
+                </button>
+              </div>
+            )}
+          </div>
+
           {loading ? (
             <div className="loading">AI grouping PRs into release categories and writing release notes...</div>
           ) : currentChangelog ? (
