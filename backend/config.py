@@ -20,15 +20,32 @@ class Settings:
     DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "info")
     
+    # CORS. Comma-separated list, or "*" for any origin.
+    CORS_ALLOW_ORIGINS: list = [
+        o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "*").split(",") if o.strip()
+    ]
+
     # AI Provider Keys
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
     DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
-    
-    # Preferred Provider (auto, gemini, openai, anthropic, ollama)
+
+    # Preferred Provider (auto, gemini, openai, anthropic, deepseek, ollama)
     AI_PROVIDER: str = os.getenv("AI_PROVIDER", "auto").lower()
-    
+
+    # Model IDs per provider. Previously hardcoded in six places across
+    # AIService, which made them impossible to update without a code change.
+    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+    ANTHROPIC_MODEL: str = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
+    DEEPSEEK_MODEL: str = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.1")
+    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+
+    # Outbound request timeout for AI provider calls, in seconds.
+    AI_TIMEOUT: int = int(os.getenv("AI_TIMEOUT", 30))
+
     # Application Fetch Limits & Defaults
     PR_FETCH_LIMIT: int = int(os.getenv("PR_FETCH_LIMIT", 100))
     DEFAULT_REPO: str = os.getenv("DEFAULT_REPO", "rpnunez/wp-ai-scheduler")

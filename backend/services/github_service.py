@@ -215,7 +215,31 @@ class GitHubService:
                 "baseRefName": pr.get("baseRefName", "main")
             })
 
-        return processed
+        return GitHubService._apply_ordering(processed, orderby)
+
+    # `gh pr list` has no --orderby flag, so the parameter used to be accepted
+    # and silently dropped. Sorting the processed rows honors the contract
+    # without depending on gh's search-qualifier syntax.
+    ORDER_FIELDS = {
+        "updated": "updated_at",
+        "created": "created_at",
+        "number": "number",
+        "risk": "risk_score",
+    }
+
+    @staticmethod
+    def _apply_ordering(rows: list, orderby: str) -> list:
+        if not orderby:
+            return rows
+
+        field_name, _, direction = orderby.partition("-")
+        key = GitHubService.ORDER_FIELDS.get(field_name)
+        if not key:
+            logger.warning("Unknown orderby '%s'; leaving GitHub's default order.", orderby)
+            return rows
+
+        reverse = direction != "asc"
+        return sorted(rows, key=lambda p: (p.get(key) is None, p.get(key)), reverse=reverse)
 
     @staticmethod
     def fetch_pr_diff(pr_number: int, repo_name: str = None, cwd: str = None) -> str:

@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { fetchRepos, addRepo, deleteRepo } from '../api/client';
+import { useToast } from './ToastProvider';
 
 export default function RepoManagerModal({ onClose, onReposUpdated }) {
+  const toast = useToast();
   const [repos, setRepos] = useState([]);
   const [newRepo, setNewRepo] = useState('');
   const [loading, setLoading] = useState(true);
@@ -47,12 +49,21 @@ export default function RepoManagerModal({ onClose, onReposUpdated }) {
   }
 
   async function handleDelete(repoName) {
+    const confirmed = await toast.confirm({
+      title: 'Remove repository?',
+      message: `"${repoName}" will be removed from this app. Its cached PRs, tags, and AI reviews stay in the database, and the repository on GitHub is not touched.`,
+      confirmLabel: 'Remove Repository',
+    });
+    if (!confirmed) return;
+
     try {
       const res = await deleteRepo(repoName);
       setRepos(res.repositories || []);
       if (onReposUpdated) onReposUpdated();
+      toast.success(`Removed ${repoName}.`);
     } catch (err) {
-      setError('Failed to delete repository.');
+      setError(err.message || 'Failed to delete repository.');
+      toast.error(`Could not remove ${repoName}: ${err.message}`);
     }
   }
 

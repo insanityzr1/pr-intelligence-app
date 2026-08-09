@@ -143,26 +143,47 @@ def post_chat_message(pr_number: int, req: ChatMessageRequest):
     return {"pr_number": pr_number, "history": history}
 
 # AI Merge Conflict Resolution endpoints
-@router.get("/{pr_number}/resolve-conflicts")
-def resolve_conflicts(pr_number: int, repo_name: Optional[str] = None):
+def _conflict_info_for(pr_number: int, repo_name: Optional[str], force: bool = False):
+    """
+    Resolve (and cache) conflict guidance for a PR.
+
+    All three conflict routes previously ran the same uncached LLM call, so
+    viewing the resolver and then downloading the script and the patch cost
+    three separate model round-trips for identical output. Cached on head_sha,
+    so a new push to the PR invalidates it.
+    """
     target_repo = repo_name or settings.DEFAULT_REPO
     cache_key = f"{target_repo}#{pr_number}"
-    pr = _prs_cache.get(cache_key, {"number": pr_number, "title": "Conflicting PR", "repo_name": target_repo})
+    pr = _prs_cache.get(
+        cache_key,
+        {"number": pr_number, "title": "Conflicting PR", "repo_name": target_repo},
+    )
+    head_sha = pr.get("head_sha", "")
+
+    if not force and head_sha:
+        cached = database.get_cached_conflict_resolution(pr_number, head_sha, target_repo)
+        if cached:
+            return cached
+
     diff = GitHubService.fetch_pr_diff(pr_number, repo_name=target_repo)
-    
     conflict_info = ConflictResolutionService.resolve_conflicts(pr, diff)
+
+    if head_sha:
+        database.save_conflict_resolution(pr_number, head_sha, conflict_info, target_repo)
+    return conflict_info
+
+
+@router.get("/{pr_number}/resolve-conflicts")
+def resolve_conflicts(pr_number: int, repo_name: Optional[str] = None, force: bool = False):
+    conflict_info = _conflict_info_for(pr_number, repo_name, force)
     return {"pr_number": pr_number, "conflict_info": conflict_info}
 
 @router.get("/{pr_number}/conflict-bash-script")
 def get_conflict_bash_script(pr_number: int, repo_name: Optional[str] = None):
-    target_repo = repo_name or settings.DEFAULT_REPO
-    cache_key = f"{target_repo}#{pr_number}"
-    pr = _prs_cache.get(cache_key, {"number": pr_number, "title": "Conflicting PR", "repo_name": target_repo})
-    diff = GitHubService.fetch_pr_diff(pr_number, repo_name=target_repo)
-    
-    conflict_info = ConflictResolutionService.resolve_conflicts(pr, diff)
+    conflict_info = _conflict_info_for(pr_number, repo_name)
     bash_text = ConflictResolutionService.generate_bash_script(pr_number, conflict_info)
-    
+
+
     return PlainTextResponse(
         content=bash_text,
         media_type="application/x-sh",
@@ -171,12 +192,7 @@ def get_conflict_bash_script(pr_number: int, repo_name: Optional[str] = None):
 
 @router.get("/{pr_number}/conflict-patch")
 def get_conflict_patch(pr_number: int, repo_name: Optional[str] = None):
-    target_repo = repo_name or settings.DEFAULT_REPO
-    cache_key = f"{target_repo}#{pr_number}"
-    pr = _prs_cache.get(cache_key, {"number": pr_number, "title": "Conflicting PR", "repo_name": target_repo})
-    diff = GitHubService.fetch_pr_diff(pr_number, repo_name=target_repo)
-    
-    conflict_info = ConflictResolutionService.resolve_conflicts(pr, diff)
+    conflict_info = _conflict_info_for(pr_number, repo_name)
     patch_text = ConflictResolutionService.generate_patch(pr_number, conflict_info)
     
     return PlainTextResponse(

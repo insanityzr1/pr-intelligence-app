@@ -188,3 +188,71 @@ def test_auxiliary_endpoints(client):
     export_res = client.get("/api/export/csv")
     assert export_res.status_code == 200
     assert "text/csv" in export_res.headers["content-type"]
+
+
+def test_ops_endpoints(client):
+    health = client.get("/health")
+    assert health.status_code == 200
+    assert health.json()["status"] == "ok"
+
+    version = client.get("/api/version")
+    assert version.status_code == 200
+    assert "version" in version.json()
+
+
+def test_spa_catch_all_does_not_shadow_api(client):
+    """Unknown /api paths must still 404, not silently return index.html."""
+    assert client.get("/api/definitely-not-a-route").status_code == 404
+
+
+def test_export_honors_filters(client):
+    """The CSV export used to ignore every filter and dump all repositories."""
+    low = {
+        "number": 3001, "id_str": "PR #3001", "url": "u", "title": "Low risk change",
+        "status": "Open", "summary": "s", "type": "Enhancement", "subtype": "Core Logic",
+        "current_status": "Review Required", "risk": "Low", "risk_detail": "Small Change",
+        "risk_score": 1, "rec_action": "Review Code", "changed_files": 1, "additions": 1,
+        "deletions": 0, "mergeable": "MERGEABLE", "author": "a",
+        "updated_at": "2026-08-08T00:00:00Z", "updated_rel": "Today",
+        "created_at": "2026-08-08T00:00:00Z", "created_fmt": "Aug 8",
+        "head_sha": "sha3001", "repo_name": "acme/alpha", "labels": [],
+    }
+    high = {**low, "number": 3002, "id_str": "PR #3002", "title": "High risk change",
+            "risk": "High", "head_sha": "sha3002", "repo_name": "acme/beta"}
+
+    _prs_cache["acme/alpha#3001"] = low
+    _prs_cache["acme/beta#3002"] = high
+
+    body = client.get("/api/export/csv?risk=High").text
+    assert "High risk change" in body
+    assert "Low risk change" not in body
+
+    body = client.get("/api/export/csv?repo_name=acme/alpha").text
+    assert "Low risk change" in body
+    assert "High risk change" not in body
+
+    payload = client.get("/api/export/json?repo_name=acme/beta").json()
+    assert payload["count"] == 1
+    assert payload["prs"][0]["number"] == 3002
+
+    md = client.get("/api/export/markdown?risk=High").text
+    assert "#3002" in md
+
+
+def test_changelog_accepts_group_id(client):
+    """`group_id` was declared on the request model but never read."""
+    pr = {
+        "number": 4001, "title": "Grouped change", "type": "Enhancement",
+        "subtype": "Core Logic", "author": "a", "head_sha": "sha4001",
+        "headRefName": "feature/x", "baseRefName": "main", "summary": "s",
+        "repo_name": "acme/alpha",
+    }
+    _prs_cache["acme/alpha#4001"] = pr
+
+    group = client.post("/api/groups", json={"name": "Grouped Release", "description": ""}).json()
+    gid = group["group"]["group_id"]
+    client.post(f"/api/groups/{gid}/items", json={"pr_numbers": [4001], "repo_name": "acme/alpha"})
+
+    res = client.post("/api/changelog", json={"pr_numbers": [], "group_id": gid})
+    assert res.status_code == 200
+    assert res.json()["pr_numbers"] == [4001]

@@ -142,11 +142,41 @@ def init_db():
     )
     """)
     
+    # 8. Conflict Resolution Cache
+    # Conflict guidance is an LLM call on a GET route that was re-run on every
+    # request. Keyed by head_sha exactly like ai_reviews, so a new push to the
+    # PR naturally invalidates it.
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS conflict_resolutions (
+        repo_name TEXT NOT NULL,
+        pr_number INTEGER NOT NULL,
+        head_sha TEXT NOT NULL,
+        resolution_data TEXT NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (repo_name, pr_number)
+    )
+    """)
+
+    # Indexes for the lookups this app actually performs. Nothing beyond the
+    # implicit primary-key indexes existed before.
+    for stmt in (
+        "CREATE INDEX IF NOT EXISTS idx_prs_repo ON prs(repo_name)",
+        "CREATE INDEX IF NOT EXISTS idx_prs_number ON prs(pr_number)",
+        "CREATE INDEX IF NOT EXISTS idx_pr_tags_repo_pr ON pr_tags(repo_name, pr_number)",
+        "CREATE INDEX IF NOT EXISTS idx_group_items_group ON pr_group_items(group_id)",
+        "CREATE INDEX IF NOT EXISTS idx_pr_chats_repo_pr ON pr_chats(repo_name, pr_number)",
+        "CREATE INDEX IF NOT EXISTS idx_changelogs_created ON changelogs(created_at DESC)",
+    ):
+        cursor.execute(stmt)
+
     # Default repository insertion if empty
     cursor.execute("SELECT COUNT(*) as cnt FROM repositories")
     if cursor.fetchone()["cnt"] == 0:
-        cursor.execute("INSERT INTO repositories (repo_name, is_active) VALUES ('rpnunez/wp-ai-scheduler', 1)")
-        
+        cursor.execute(
+            "INSERT INTO repositories (repo_name, is_active) VALUES (?, 1)",
+            (settings.DEFAULT_REPO,),
+        )
+
     conn.commit()
     conn.close()
 
@@ -183,6 +213,41 @@ def save_ai_review(pr_number: int, head_sha: str, ai_data: dict, repo_name: str 
     """, (target_repo, pr_number, head_sha, ai_json))
     conn.commit()
     conn.close()
+
+# Conflict Resolutions
+def get_cached_conflict_resolution(pr_number: int, head_sha: str, repo_name: str = None):
+    target_repo = repo_name or settings.DEFAULT_REPO
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT resolution_data FROM conflict_resolutions WHERE repo_name = ? AND pr_number = ? AND head_sha = ?",
+        (target_repo, pr_number, head_sha),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        try:
+            return json.loads(row["resolution_data"])
+        except Exception:
+            return None
+    return None
+
+
+def save_conflict_resolution(pr_number: int, head_sha: str, resolution: dict, repo_name: str = None):
+    target_repo = repo_name or settings.DEFAULT_REPO
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+    INSERT INTO conflict_resolutions (repo_name, pr_number, head_sha, resolution_data, updated_at)
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(repo_name, pr_number) DO UPDATE SET
+        head_sha=excluded.head_sha,
+        resolution_data=excluded.resolution_data,
+        updated_at=CURRENT_TIMESTAMP
+    """, (target_repo, pr_number, head_sha, json.dumps(resolution)))
+    conn.commit()
+    conn.close()
+
 
 # Repositories
 def get_repositories():

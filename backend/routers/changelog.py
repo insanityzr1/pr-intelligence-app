@@ -15,11 +15,27 @@ def get_changelogs():
 @router.post("")
 def generate_changelog(req: ChangelogRequest):
     _populate_memory_cache_from_db()
-    selected_prs = [p for p in _prs_cache.values() if p.get("number") in req.pr_numbers]
-    
+
+    # `group_id` was declared on the request model but never read: passing a
+    # workspace id silently did nothing. When present it now sources the PR set
+    # (and the title) from the workspace itself, so callers need not duplicate
+    # the membership list.
+    if req.group_id:
+        items = database.get_group_items(req.group_id)
+        if not items:
+            raise HTTPException(status_code=400, detail="Workspace is empty or does not exist.")
+        wanted = {(i["repo_name"], i["pr_number"]) for i in items}
+        selected_prs = [
+            p for p in _prs_cache.values()
+            if (p.get("repo_name"), p.get("number")) in wanted
+        ]
+    else:
+        selected_prs = [p for p in _prs_cache.values() if p.get("number") in req.pr_numbers]
+
     if not selected_prs:
         raise HTTPException(status_code=400, detail="No matching PRs found for selected IDs.")
-        
+
+
     result = ChangelogService.generate_changelog(selected_prs)
     markdown_text = result.get("markdown", "")
     

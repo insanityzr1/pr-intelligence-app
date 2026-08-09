@@ -3,8 +3,10 @@ import { fetchGroups, createGroup, updateGroup, deleteGroup, fetchGroupItems, ad
 import FormattedMarkdown from './FormattedMarkdown';
 import WorkspaceModal from './WorkspaceModal';
 import { itemRefKey, prRefKey, isConflicting } from '../utils/prStats';
+import { useToast } from './ToastProvider';
 
 export default function StagingWorkspacesTab({ prs, onSelectPr }) {
+  const toast = useToast();
   const [groups, setGroups] = useState([]);
   const [activeGroupId, setActiveGroupId] = useState(null);
   const [activeItems, setActiveItems] = useState([]);
@@ -73,6 +75,17 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
 
   async function handleDeleteGroup(gId, e) {
     if (e) e.stopPropagation();
+
+    // Deleting a workspace previously fired instantly with no confirmation and
+    // no undo.
+    const group = groups.find(g => g.group_id === gId);
+    const confirmed = await toast.confirm({
+      title: 'Delete workspace?',
+      message: `"${group?.name || 'This workspace'}" and its staged PR list will be permanently removed. The pull requests themselves are not affected.`,
+      confirmLabel: 'Delete Workspace',
+    });
+    if (!confirmed) return;
+
     try {
       await deleteGroup(gId);
       await loadGroups();
@@ -80,8 +93,10 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
         setActiveGroupId(null);
         setActiveItems([]);
       }
+      toast.success(`Deleted "${group?.name || 'workspace'}".`);
     } catch (err) {
       console.error(err);
+      toast.error(`Could not delete workspace: ${err.message}`);
     }
   }
 
@@ -167,9 +182,10 @@ export default function StagingWorkspacesTab({ prs, onSelectPr }) {
       for (const [repo, nums] of Object.entries(byRepo)) {
         await analyzePRs(nums, true, repo);
       }
-      alert(`Batch AI Analysis complete for ${activeItems.length} PRs in this workspace!`);
+      toast.success(`Batch AI review complete for ${activeItems.length} PRs.`);
     } catch (err) {
       console.error(err);
+      toast.error(`Batch AI review failed: ${err.message}`);
     } finally {
       setBatchAnalyzing(false);
     }
