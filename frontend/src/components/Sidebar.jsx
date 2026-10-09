@@ -28,7 +28,8 @@ export default function Sidebar({
       icon: '🚀',
       items: [
         { id: 'workspaces', label: 'PR Workspaces', icon: '📦', shortcut: '3' },
-        { id: 'release', label: 'Release Builder', icon: '🚀', shortcut: '4' }
+        { id: 'train', label: 'Merge Train', icon: '🚆', shortcut: '4' },
+        { id: 'release', label: 'Release Builder', icon: '🚀', shortcut: '5' }
       ]
     }
   ];

@@ -118,3 +118,18 @@ class ApplyFixRequest(BaseModel):
     commit_message: Optional[str] = "fix(ci): apply AI automated remediation patch"
     repo_name: Optional[str] = None
     branch_name: Optional[str] = None
+
+class MergeTrainSimulateRequest(BaseModel):
+    pr_numbers: List[int]
+    repo_name: Optional[str] = None
+    base_branch: Optional[str] = "main"
+    auto_order: bool = True
+
+class MergeTrainPublishRequest(BaseModel):
+    staging_branch: str
+    final_commit: str
+    repo_name: Optional[str] = None
+    pr_numbers: List[int] = []
+    create_pr: bool = False
+    pr_title: Optional[str] = ""
+    pr_body: Optional[str] = ""

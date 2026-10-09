@@ -12,11 +12,12 @@ import PRDetailDrawer from './components/PRDetailDrawer';
 import ConflictMap from './components/ConflictMap';
 import ReleaseBuilder from './components/ReleaseBuilder';
 import StagingWorkspacesTab from './components/StagingWorkspacesTab';
+import MergeTrainTab from './components/MergeTrainTab';
 import RepoManagerModal from './components/RepoManagerModal';
 import ConflictResolverModal from './components/ConflictResolverModal';
 import './App.css';
 
-const VALID_TABS = ['matrix', 'conflicts', 'workspaces', 'release'];
+const VALID_TABS = ['matrix', 'conflicts', 'workspaces', 'train', 'release'];
 
 export default function App() {
   const toast = useToast();
@@ -326,6 +327,10 @@ export default function App() {
 
             {activeTab === 'workspaces' && (
               <StagingWorkspacesTab prs={filteredPrs} onSelectPr={handleSelectPr} />
+            )}
+
+            {activeTab === 'train' && (
+              <MergeTrainTab prs={filteredPrs} onSelectPr={handleSelectPr} />
             )}
 
             {activeTab === 'release' && (

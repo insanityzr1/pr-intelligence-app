@@ -404,3 +404,45 @@ export function downloadCiPatchUrl(prNumber, repoName = null) {
   return `${API_BASE}/prs/${prNumber}/download-patch${q ? `?${q}` : ''}`;
 }
 
+// ---- Virtual Merge Train Simulator ---------------------------------------
+
+export async function simulateMergeTrain({ prNumbers = [], repoName = null, baseBranch = 'main', autoOrder = true } = {}) {
+  const res = await apiFetch(`${API_BASE}/merge-train/simulate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      pr_numbers: prNumbers,
+      repo_name: repoName,
+      base_branch: baseBranch,
+      auto_order: autoOrder
+    })
+  });
+  if (!res.ok) throw await apiError(res, 'Failed to simulate merge train');
+  return res.json();
+}
+
+export async function publishMergeTrain({ stagingBranch, finalCommit, repoName = null, prNumbers = [], createPr = false, prTitle = '', prBody = '' }) {
+  const res = await apiFetch(`${API_BASE}/merge-train/publish`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      staging_branch: stagingBranch,
+      final_commit: finalCommit,
+      repo_name: repoName,
+      pr_numbers: prNumbers,
+      create_pr: createPr,
+      pr_title: prTitle,
+      pr_body: prBody
+    })
+  });
+  if (!res.ok) throw await apiError(res, 'Failed to publish staging branch');
+  return res.json();
+}
+
+export async function fetchMergeTrainStatus() {
+  const res = await apiFetch(`${API_BASE}/merge-train/status`);
+  if (!res.ok) throw await apiError(res, 'Failed to fetch merge train capability status');
+  return res.json();
+}
+
+
