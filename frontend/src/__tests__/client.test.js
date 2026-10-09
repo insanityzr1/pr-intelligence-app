@@ -22,7 +22,11 @@ import {
   deleteGroup,
   fetchGroupItems,
   addPrsToGroup,
-  removePrFromGroup
+  removePrFromGroup,
+  triageCi,
+  bulkTriageCi,
+  applyCiFix,
+  downloadCiPatchUrl
 } from '../api/client';
 
 describe('API Client Library', () => {
@@ -130,4 +134,61 @@ describe('API Client Library', () => {
     }));
     expect(result).toEqual(mockGroup);
   });
+
+  it('triageCi sends POST request to PR ci-triage endpoint', async () => {
+    const mockTriage = { status: 'success', triage: { failure_category: 'lint' } };
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => mockTriage
+    });
+
+    const result = await triageCi(101, 'test/repo', { force: true });
+    expect(global.fetch).toHaveBeenCalledWith('/api/prs/101/ci-triage', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ repo_name: 'test/repo', custom_log: null, force: true })
+    }));
+    expect(result).toEqual(mockTriage);
+  });
+
+  it('bulkTriageCi sends POST request to bulk triage endpoint', async () => {
+    const mockBulk = { status: 'success', results: [] };
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => mockBulk
+    });
+
+    const result = await bulkTriageCi([101, 102], 'test/repo');
+    expect(global.fetch).toHaveBeenCalledWith('/api/prs/bulk/ci-triage', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ pr_numbers: [101, 102], repo_name: 'test/repo', force: false })
+    }));
+    expect(result).toEqual(mockBulk);
+  });
+
+  it('applyCiFix sends POST request to apply-fix endpoint', async () => {
+    const mockApply = { status: 'success', result: { action: 'push_to_pr' } };
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => mockApply
+    });
+
+    const result = await applyCiFix(101, { patch: 'diff', action: 'push_to_pr', repoName: 'test/repo' });
+    expect(global.fetch).toHaveBeenCalledWith('/api/prs/101/apply-fix', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        patch: 'diff',
+        action: 'push_to_pr',
+        commit_message: null,
+        repo_name: 'test/repo',
+        branch_name: null
+      })
+    }));
+    expect(result).toEqual(mockApply);
+  });
+
+  it('downloadCiPatchUrl builds query url correctly', () => {
+    expect(downloadCiPatchUrl(101, 'test/repo')).toBe('/api/prs/101/download-patch?repo_name=test%2Frepo');
+    expect(downloadCiPatchUrl(101)).toBe('/api/prs/101/download-patch');
+  });
 });
+

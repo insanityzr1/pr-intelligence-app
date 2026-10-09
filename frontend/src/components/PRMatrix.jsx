@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { fetchTagsMap } from '../api/client';
 import PRCommandBar from './PRCommandBar';
 import BulkActionBar from './BulkActionBar';
+import PRPipelineBoard from './PRPipelineBoard';
 import CIBadge from './CIBadge';
 import { isConflicting, isMergeable, isHighRisk, isAiAnalyzed, prRefKey } from '../utils/prStats';
 
@@ -26,6 +27,7 @@ export default function PRMatrix({ prs, onSelectPr, tagsMap: tagsMapProp, onTags
   const [ownTagsMap, setOwnTagsMap] = useState({});
   const [sortKey, setSortKey] = useState('updated_at');
   const [sortDir, setSortDir] = useState('desc');
+  const [viewMode, setViewMode] = useState('table'); // 'table' | 'pipeline'
 
   // Bulk selection, keyed by `{repo}#{number}`.
   const [selectedKeys, setSelectedKeys] = useState(() => new Set());
@@ -252,14 +254,42 @@ export default function PRMatrix({ prs, onSelectPr, tagsMap: tagsMapProp, onTags
         clearAllFilters={clearAllFilters}
       />
 
-      <BulkActionBar
-        selectedPrs={selectedPrs}
-        onClear={clearSelection}
-        onTagsChanged={refreshTags}
-      />
+      <div className="matrix-view-toggle-bar">
+        <div className="view-mode-buttons" role="tablist" aria-label="View Mode">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewMode === 'table'}
+            className={`view-mode-btn ${viewMode === 'table' ? 'active' : ''}`}
+            onClick={() => setViewMode('table')}
+          >
+            📊 Table View
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewMode === 'pipeline'}
+            className={`view-mode-btn ${viewMode === 'pipeline' ? 'active' : ''}`}
+            onClick={() => setViewMode('pipeline')}
+          >
+            📋 Lifecycle Pipeline
+          </button>
+        </div>
+        <div className="view-mode-meta">
+          <span>Showing {sorted.length} {sorted.length === 1 ? 'PR' : 'PRs'}</span>
+        </div>
+      </div>
 
-      <div className="table-container">
-        <table>
+      {viewMode === 'table' ? (
+        <>
+          <BulkActionBar
+            selectedPrs={selectedPrs}
+            onClear={clearSelection}
+            onTagsChanged={refreshTags}
+          />
+
+          <div className="table-container">
+            <table>
           <thead>
             <tr>
               <th className="select-cell">
@@ -396,7 +426,11 @@ export default function PRMatrix({ prs, onSelectPr, tagsMap: tagsMapProp, onTags
             )}
           </tbody>
         </table>
-      </div>
+          </div>
+        </>
+      ) : (
+        <PRPipelineBoard prs={sorted} onSelectPr={onSelectPr} />
+      )}
     </div>
   );
 }

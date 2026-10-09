@@ -36,4 +36,5 @@ def test_db():
 @pytest.fixture
 def client(test_db):
     """FastAPI TestClient fixture."""
-    return TestClient(app)
+    headers = {"X-API-Key": settings.API_KEY} if settings.API_KEY else {}
+    return TestClient(app, headers=headers)

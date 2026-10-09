@@ -12,11 +12,12 @@ import PRDetailDrawer from './components/PRDetailDrawer';
 import ConflictMap from './components/ConflictMap';
 import ReleaseBuilder from './components/ReleaseBuilder';
 import StagingWorkspacesTab from './components/StagingWorkspacesTab';
+import MergeTrainTab from './components/MergeTrainTab';
 import RepoManagerModal from './components/RepoManagerModal';
 import ConflictResolverModal from './components/ConflictResolverModal';
 import './App.css';
 
-const VALID_TABS = ['matrix', 'conflicts', 'workspaces', 'release'];
+const VALID_TABS = ['matrix', 'conflicts', 'workspaces', 'train', 'release'];
 
 export default function App() {
   const toast = useToast();
@@ -234,13 +235,13 @@ export default function App() {
 
   // Resolve the PR's repository from the PR itself, falling back to the active repo
   // filter. Callers that already know the repo pass it explicitly.
-  function handleSelectPr(num, repoName) {
+  function handleSelectPr(num, repoName, initialTab) {
     const resolved =
       repoName ||
       prs.find(p => prNumberOf(p) === num)?.repo_name ||
       selectedRepo ||
       null;
-    setSelectedPr({ prNumber: num, repoName: resolved });
+    setSelectedPr({ prNumber: num, repoName: resolved, initialTab });
   }
 
   // Filter PRs by search query.
@@ -328,6 +329,10 @@ export default function App() {
               <StagingWorkspacesTab prs={filteredPrs} onSelectPr={handleSelectPr} />
             )}
 
+            {activeTab === 'train' && (
+              <MergeTrainTab prs={filteredPrs} onSelectPr={handleSelectPr} />
+            )}
+
             {activeTab === 'release' && (
               <ReleaseBuilder prs={filteredPrs} />
             )}
@@ -336,6 +341,7 @@ export default function App() {
               <PRDetailDrawer
                 prNumber={selectedPr.prNumber}
                 repoName={selectedPr.repoName}
+                initialTab={selectedPr.initialTab}
                 onClose={() => setSelectedPr(null)}
                 onResolveConflict={(num, repo) => setConflictResolverPr({ prNumber: num, repoName: repo })}
               />

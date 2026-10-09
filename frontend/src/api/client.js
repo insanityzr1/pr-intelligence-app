@@ -358,3 +358,91 @@ export async function removePrFromGroup(groupId, prNumber, repoName = null) {
   }
   return res.json();
 }
+
+// ---- CI Failure Triage & Remediation --------------------------------------
+
+export async function triageCi(prNumber, repoName = null, { customLog = null, force = false } = {}) {
+  const res = await apiFetch(`${API_BASE}/prs/${prNumber}/ci-triage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repo_name: repoName, custom_log: customLog, force })
+  });
+  if (!res.ok) throw await apiError(res, `Failed to triage CI failure for PR #${prNumber}`);
+  return res.json();
+}
+
+export async function bulkTriageCi(prNumbers = [], repoName = null, force = false) {
+  const res = await apiFetch(`${API_BASE}/prs/bulk/ci-triage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pr_numbers: prNumbers, repo_name: repoName, force })
+  });
+  if (!res.ok) throw await apiError(res, 'Failed to perform bulk CI triage');
+  return res.json();
+}
+
+export async function applyCiFix(prNumber, { patch, action = 'push_to_pr', commitMessage = null, repoName = null, branchName = null } = {}) {
+  const res = await apiFetch(`${API_BASE}/prs/${prNumber}/apply-fix`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      patch,
+      action,
+      commit_message: commitMessage,
+      repo_name: repoName,
+      branch_name: branchName
+    })
+  });
+  if (!res.ok) throw await apiError(res, `Failed to apply fix for PR #${prNumber}`);
+  return res.json();
+}
+
+export function downloadCiPatchUrl(prNumber, repoName = null) {
+  const params = new URLSearchParams();
+  if (repoName) params.set('repo_name', repoName);
+  const q = params.toString();
+  return `${API_BASE}/prs/${prNumber}/download-patch${q ? `?${q}` : ''}`;
+}
+
+// ---- Virtual Merge Train Simulator ---------------------------------------
+
+export async function simulateMergeTrain({ prNumbers = [], repoName = null, baseBranch = 'main', autoOrder = true } = {}) {
+  const res = await apiFetch(`${API_BASE}/merge-train/simulate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      pr_numbers: prNumbers,
+      repo_name: repoName,
+      base_branch: baseBranch,
+      auto_order: autoOrder
+    })
+  });
+  if (!res.ok) throw await apiError(res, 'Failed to simulate merge train');
+  return res.json();
+}
+
+export async function publishMergeTrain({ stagingBranch, finalCommit, repoName = null, prNumbers = [], createPr = false, prTitle = '', prBody = '' }) {
+  const res = await apiFetch(`${API_BASE}/merge-train/publish`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      staging_branch: stagingBranch,
+      final_commit: finalCommit,
+      repo_name: repoName,
+      pr_numbers: prNumbers,
+      create_pr: createPr,
+      pr_title: prTitle,
+      pr_body: prBody
+    })
+  });
+  if (!res.ok) throw await apiError(res, 'Failed to publish staging branch');
+  return res.json();
+}
+
+export async function fetchMergeTrainStatus() {
+  const res = await apiFetch(`${API_BASE}/merge-train/status`);
+  if (!res.ok) throw await apiError(res, 'Failed to fetch merge train capability status');
+  return res.json();
+}
+
+

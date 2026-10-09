@@ -101,3 +101,35 @@ class GroupCreateRequest(BaseModel):
 class GroupItemAddRequest(BaseModel):
     pr_numbers: List[int]
     repo_name: Optional[str] = None
+
+class CITriageRequest(BaseModel):
+    force: bool = False
+    repo_name: Optional[str] = None
+    custom_log: Optional[str] = None
+
+class BulkCITriageRequest(BaseModel):
+    pr_numbers: List[int]
+    force: bool = False
+    repo_name: Optional[str] = None
+
+class ApplyFixRequest(BaseModel):
+    action: str = "push_to_pr" # "push_to_pr" | "create_branch"
+    patch: str
+    commit_message: Optional[str] = "fix(ci): apply AI automated remediation patch"
+    repo_name: Optional[str] = None
+    branch_name: Optional[str] = None
+
+class MergeTrainSimulateRequest(BaseModel):
+    pr_numbers: List[int]
+    repo_name: Optional[str] = None
+    base_branch: Optional[str] = "main"
+    auto_order: bool = True
+
+class MergeTrainPublishRequest(BaseModel):
+    staging_branch: str
+    final_commit: str
+    repo_name: Optional[str] = None
+    pr_numbers: List[int] = []
+    create_pr: bool = False
+    pr_title: Optional[str] = ""
+    pr_body: Optional[str] = ""
