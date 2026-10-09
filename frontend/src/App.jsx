@@ -235,13 +235,13 @@ export default function App() {
 
   // Resolve the PR's repository from the PR itself, falling back to the active repo
   // filter. Callers that already know the repo pass it explicitly.
-  function handleSelectPr(num, repoName) {
+  function handleSelectPr(num, repoName, initialTab) {
     const resolved =
       repoName ||
       prs.find(p => prNumberOf(p) === num)?.repo_name ||
       selectedRepo ||
       null;
-    setSelectedPr({ prNumber: num, repoName: resolved });
+    setSelectedPr({ prNumber: num, repoName: resolved, initialTab });
   }
 
   // Filter PRs by search query.
@@ -341,6 +341,7 @@ export default function App() {
               <PRDetailDrawer
                 prNumber={selectedPr.prNumber}
                 repoName={selectedPr.repoName}
+                initialTab={selectedPr.initialTab}
                 onClose={() => setSelectedPr(null)}
                 onResolveConflict={(num, repo) => setConflictResolverPr({ prNumber: num, repoName: repo })}
               />

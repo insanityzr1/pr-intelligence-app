@@ -50,13 +50,15 @@ async def require_api_key(
     if path in PUBLIC_PATHS or not path.startswith("/api/"):
         return
 
-    supplied = x_api_key
-    if not supplied:
-        auth_header = request.headers.get("authorization", "")
-        if auth_header.lower().startswith("bearer "):
-            supplied = auth_header[7:].strip()
-
     # Constant-time compare: `==` on a secret leaks it byte by byte under timing
-    # analysis.
-    if not supplied or not hmac.compare_digest(supplied, settings.API_KEY):
-        raise HTTPException(status_code=401, detail="Invalid or missing API key.")
+    # analysis. Check X-API-Key first; if not valid, check Authorization: Bearer.
+    if x_api_key and hmac.compare_digest(x_api_key, settings.API_KEY):
+        return
+
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        bearer_token = auth_header[7:].strip()
+        if bearer_token and hmac.compare_digest(bearer_token, settings.API_KEY):
+            return
+
+    raise HTTPException(status_code=401, detail="Invalid or missing API key.")

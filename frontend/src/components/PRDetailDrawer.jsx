@@ -16,9 +16,9 @@ import FormattedMarkdown from './FormattedMarkdown';
 import PRTagBar from './PRTagBar';
 import { refKey } from '../utils/prStats';
 
-export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveConflict }) {
+export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveConflict, initialTab = 'overview' }) {
   const toast = useToast();
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(initialTab || 'overview');
   const [pr, setPr] = useState(null);
   const [activeTags, setActiveTags] = useState([]);
   const [loading, setLoading] = useState(true);
