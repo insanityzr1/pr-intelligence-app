@@ -13,7 +13,7 @@ from config import settings
 from database import init_db
 from routers import (
     prs, conflicts, changelog, export, repos, tags, build,
-    events, jobs, writeback, dependencies,
+    events, jobs, writeback, dependencies, ci_triage,
 )
 from services.auth_service import auth_enabled, require_api_key
 from services.job_service import JobService
@@ -132,6 +132,7 @@ app.include_router(events.router)
 app.include_router(jobs.router)
 app.include_router(writeback.router)
 app.include_router(dependencies.router)
+app.include_router(ci_triage.router)
 
 # Serve Frontend static build if present
 frontend_dist = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")

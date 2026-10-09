@@ -2778,4 +2778,166 @@ tr.row-conflicting > td:first-child {
   }
 }
 
+/* ==========================================================================
+   CI Failure Triage & 1-Click Remediation Styling
+   ========================================================================== */
+.ci-triage-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.ci-header-status-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  padding: 1.25rem 1.5rem;
+}
+
+.ci-status-info h3 {
+  margin: 0 0 0.25rem 0;
+  font-size: 1.15rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.ci-badge {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 9999px;
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.ci-badge.failing {
+  background: var(--badge-red-bg);
+  color: var(--badge-red-txt);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.ci-badge.passing {
+  background: var(--badge-green-bg);
+  color: var(--badge-green-txt);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.ci-badge.pending {
+  background: var(--badge-amber-bg);
+  color: var(--badge-amber-txt);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.tab-pill-danger {
+  background: #ef4444;
+  color: #fff;
+  font-size: 0.65rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-weight: 700;
+  margin-left: 0.4rem;
+}
+
+.ci-triage-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.ci-files-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.ci-file-tag {
+  background: rgba(99, 102, 241, 0.15);
+  color: #a5b4fc;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 0.8rem;
+}
+
+.ci-remediation-card {
+  background: var(--card-bg);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 0.75rem;
+  padding: 1.25rem 1.5rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+}
+
+.ci-remediation-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.ci-remediation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.btn-success {
+  background: #059669;
+  color: #fff;
+}
+
+.btn-success:hover {
+  background: #047857;
+}
+
+.patch-diff-container {
+  background: #090d16;
+  border: 1px solid var(--border-color);
+  border-radius: 0.5rem;
+  max-height: 380px;
+  overflow: auto;
+  padding: 1rem;
+}
+
+.patch-diff-code {
+  font-family: 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  color: #e2e8f0;
+}
+
+.ci-raw-log-section {
+  border-top: 1px dashed var(--border-color);
+  padding-top: 1rem;
+}
+
+.toggle-log-btn {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.raw-ci-log-box {
+  margin-top: 0.75rem;
+  background: #090d16;
+  border: 1px solid var(--border-color);
+  padding: 1rem;
+  border-radius: 0.5rem;
+  max-height: 250px;
+  overflow: auto;
+  font-family: monospace;
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
 

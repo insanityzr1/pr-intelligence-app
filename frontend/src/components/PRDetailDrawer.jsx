@@ -1,5 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { fetchPRDetail, analyzePRs, fetchPRChatHistory, postPRChatMessage, fetchTagsMap, postReviewComment, syncLabels } from '../api/client';
+import {
+  fetchPRDetail,
+  analyzePRs,
+  fetchPRChatHistory,
+  postPRChatMessage,
+  fetchTagsMap,
+  postReviewComment,
+  syncLabels,
+  triageCi,
+  applyCiFix,
+  downloadCiPatchUrl,
+} from '../api/client';
 import { useToast } from './ToastProvider';
 import FormattedMarkdown from './FormattedMarkdown';
 import PRTagBar from './PRTagBar';
@@ -13,6 +24,13 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [posting, setPosting] = useState(false);
+
+  // CI Triage State
+  const [ciTriage, setCiTriage] = useState(null);
+  const [loadingCi, setLoadingCi] = useState(false);
+  const [applyingFix, setApplyingFix] = useState(false);
+  const [applyCommand, setApplyCommand] = useState('');
+  const [showRawLog, setShowRawLog] = useState(false);
 
   async function handlePostReview() {
     setPosting(true);
@@ -45,6 +63,46 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
     } finally {
       setPosting(false);
     }
+  }
+
+  async function handleRunCiTriage(force = false) {
+    setLoadingCi(true);
+    try {
+      const res = await triageCi(prNumber, repoName || pr?.repo_name, { force });
+      setCiTriage(res.triage);
+      setApplyCommand(res.apply_command || '');
+      toast.success(`CI Failure diagnosed: ${res.triage?.failure_category?.toUpperCase() || 'Identified'}`);
+    } catch (err) {
+      console.error(err);
+      toast.error(`CI Triage failed: ${err.message}`);
+    } finally {
+      setLoadingCi(false);
+    }
+  }
+
+  async function handleApplyFix(action) {
+    if (!ciTriage?.suggested_patch) return;
+    setApplyingFix(true);
+    try {
+      const res = await applyCiFix(prNumber, {
+        patch: ciTriage.suggested_patch,
+        action,
+        commitMessage: ciTriage.commit_message,
+        repoName: repoName || pr?.repo_name
+      });
+      toast.success(res.result?.message || `Applied remediation to ${res.result?.target_branch}`);
+    } catch (err) {
+      console.error(err);
+      toast.error(`Failed to apply fix: ${err.message}`);
+    } finally {
+      setApplyingFix(false);
+    }
+  }
+
+  function handleCopyCommand() {
+    if (!applyCommand) return;
+    navigator.clipboard.writeText(applyCommand);
+    toast.success('Copied git apply command to clipboard!');
   }
 
   // Chat State
@@ -191,6 +249,15 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
           >
             💬 Chat with AI ({chatHistory.length})
           </button>
+          <button
+            className={`subtab-btn ${activeTab === 'ci-triage' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveTab('ci-triage');
+              if (!ciTriage && !loadingCi) handleRunCiTriage(false);
+            }}
+          >
+            🛠️ CI Diagnostics & Fix {pr?.checks_state === 'FAILING' && <span className="tab-pill-danger">FAILING</span>}
+          </button>
         </div>
 
         {loading ? (
@@ -266,7 +333,7 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
               </div>
             </div>
           </div>
-        ) : (
+        ) : activeTab === 'chat' ? (
           /* Interactive Chat Tab */
           <div className="drawer-body chat-tab-body">
             <div className="chat-stream">
@@ -300,6 +367,147 @@ export default function PRDetailDrawer({ prNumber, repoName, onClose, onResolveC
                 {sendingChat ? 'Thinking...' : 'Send'}
               </button>
             </form>
+          </div>
+        ) : (
+          /* CI Diagnostics & Remediation Tab */
+          <div className="drawer-body ci-triage-body">
+            <div className="ci-header-status-card">
+              <div className="ci-status-info">
+                <h3>CI Pipeline Status: <span className={`ci-badge ${(pr?.checks_state || 'none').toLowerCase()}`}>{pr?.checks_state || 'UNKNOWN'}</span></h3>
+                <p className="subtitle">
+                  {pr?.checks_failed > 0
+                    ? `${pr.checks_failed} failing check(s): ${pr.failed_checks?.join(', ') || 'Workflow error'}`
+                    : pr?.checks_state === 'PASSING'
+                    ? 'All workflow checks passing.'
+                    : 'Check run summary unavailable or pending.'}
+                </p>
+              </div>
+              <div className="ci-header-actions">
+                <button
+                  onClick={() => handleRunCiTriage(true)}
+                  disabled={loadingCi}
+                  className="btn btn-primary btn-sm"
+                >
+                  {loadingCi ? 'Diagnosing...' : '🔍 Re-Run Diagnostics'}
+                </button>
+              </div>
+            </div>
+
+            {loadingCi ? (
+              <div className="empty-box">
+                <div className="loading-spinner">⚙️</div>
+                <p>Analyzing GitHub Actions failure logs & generating fix diff...</p>
+              </div>
+            ) : ciTriage ? (
+              <div className="ci-triage-content">
+                {/* Executive Diagnosis */}
+                <div className="ai-review-card">
+                  <div className="score-inline">
+                    <span className="score-label">Category:</span>
+                    <strong className="badge badge-purple">{ciTriage.failure_category?.toUpperCase()}</strong>
+                    <span className="score-label" style={{ marginLeft: '1.5rem' }}>Confidence:</span>
+                    <strong className={`badge ${ciTriage.confidence === 'High' ? 'badge-green' : 'badge-amber'}`}>{ciTriage.confidence}</strong>
+                  </div>
+
+                  <div className="section-block">
+                    <h4 className="section-title">⚡ Root Cause Executive Summary</h4>
+                    <p className="section-text">{ciTriage.summary}</p>
+                  </div>
+
+                  <div className="section-block">
+                    <h4 className="section-title">🔍 In-Depth Root Cause Analysis</h4>
+                    <FormattedMarkdown content={ciTriage.root_cause_analysis} />
+                  </div>
+
+                  {ciTriage.affected_files?.length > 0 && (
+                    <div className="section-block">
+                      <h4 className="section-title">📁 Identified Files</h4>
+                      <div className="ci-files-list">
+                        {ciTriage.affected_files.map((f, i) => (
+                          <span key={i} className="ci-file-tag">{f}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Remediation Diff & Actions */}
+                {ciTriage.suggested_patch ? (
+                  <div className="ci-remediation-card">
+                    <div className="ci-remediation-header">
+                      <div>
+                        <h4>✨ AI-Synthesized Remediation Diff</h4>
+                        <p className="subtitle">Commit message: <code>{ciTriage.commit_message}</code></p>
+                      </div>
+                      <div className="ci-remediation-actions">
+                        <button
+                          onClick={() => handleApplyFix('push_to_pr')}
+                          disabled={applyingFix}
+                          className="btn btn-success btn-sm"
+                          title="Directly push remediation commit to PR branch"
+                        >
+                          {applyingFix ? 'Applying...' : '🚀 Push Fix to PR Branch'}
+                        </button>
+                        <button
+                          onClick={() => handleApplyFix('create_branch')}
+                          disabled={applyingFix}
+                          className="btn btn-secondary btn-sm"
+                          title="Create patch/pr-{num}-ci-fix branch on GitHub"
+                        >
+                          🌿 Create Patch Branch
+                        </button>
+                        <a
+                          href={downloadCiPatchUrl(prNumber, repoName || pr?.repo_name)}
+                          className="btn btn-secondary btn-sm"
+                          download={`pr-${prNumber}-ci-fix.patch`}
+                        >
+                          💾 Download .patch
+                        </a>
+                        <button
+                          onClick={handleCopyCommand}
+                          className="btn btn-secondary btn-sm"
+                          title="Copy git apply terminal command"
+                        >
+                          📋 Copy git Command
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="patch-diff-container">
+                      <pre className="patch-diff-code"><code>{ciTriage.suggested_patch}</code></pre>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="empty-box">
+                    <p>No automated diff could be synthesized. Review the diagnosis recommendations and CI log below.</p>
+                  </div>
+                )}
+
+                {/* Raw CI Log Collapsible */}
+                {ciTriage.raw_log_snippet && (
+                  <div className="ci-raw-log-section">
+                    <button
+                      className="btn btn-link-sm toggle-log-btn"
+                      onClick={() => setShowRawLog(!showRawLog)}
+                    >
+                      {showRawLog ? '▼ Hide Failing CI Log Snippet' : '▶ View Failing CI Log Snippet'}
+                    </button>
+                    {showRawLog && (
+                      <pre className="raw-ci-log-box">
+                        <code>{ciTriage.raw_log_snippet}</code>
+                      </pre>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="empty-box">
+                <p>No CI diagnostics run for PR #{prNumber} yet.</p>
+                <button onClick={() => handleRunCiTriage(true)} className="btn btn-primary btn-sm">
+                  Run CI Failure Diagnostics
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

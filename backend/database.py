@@ -157,6 +157,18 @@ def init_db():
     )
     """)
 
+    # 9. CI Failure Triage Cache
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS ci_triage_cache (
+        repo_name TEXT NOT NULL,
+        pr_number INTEGER NOT NULL,
+        head_sha TEXT NOT NULL,
+        triage_data TEXT NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (repo_name, pr_number)
+    )
+    """)
+
     # Indexes for the lookups this app actually performs. Nothing beyond the
     # implicit primary-key indexes existed before.
     for stmt in (
@@ -245,6 +257,41 @@ def save_conflict_resolution(pr_number: int, head_sha: str, resolution: dict, re
         resolution_data=excluded.resolution_data,
         updated_at=CURRENT_TIMESTAMP
     """, (target_repo, pr_number, head_sha, json.dumps(resolution)))
+    conn.commit()
+    conn.close()
+
+
+# CI Triage Cache
+def get_cached_ci_triage(pr_number: int, head_sha: str, repo_name: str = None):
+    target_repo = repo_name or settings.DEFAULT_REPO
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT triage_data FROM ci_triage_cache WHERE repo_name = ? AND pr_number = ? AND head_sha = ?",
+        (target_repo, pr_number, head_sha),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        try:
+            return json.loads(row["triage_data"])
+        except Exception:
+            return None
+    return None
+
+
+def save_ci_triage(pr_number: int, head_sha: str, triage_data: dict, repo_name: str = None):
+    target_repo = repo_name or settings.DEFAULT_REPO
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("""
+    INSERT INTO ci_triage_cache (repo_name, pr_number, head_sha, triage_data, updated_at)
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(repo_name, pr_number) DO UPDATE SET
+        head_sha=excluded.head_sha,
+        triage_data=excluded.triage_data,
+        updated_at=CURRENT_TIMESTAMP
+    """, (target_repo, pr_number, head_sha, json.dumps(triage_data)))
     conn.commit()
     conn.close()
 

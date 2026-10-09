@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { analyzePRs, addPRTag, fetchGroups, addPrsToGroup } from '../api/client';
+import { analyzePRs, addPRTag, fetchGroups, addPrsToGroup, bulkTriageCi } from '../api/client';
 import { useToast } from './ToastProvider';
 import { prNumberOf } from '../utils/prStats';
 
@@ -62,6 +62,12 @@ export default function BulkActionBar({ selectedPrs, onClear, onTagsChanged }) {
     }
   });
 
+  const handleCiTriage = () => runBulk('CI Failure Triage complete', async () => {
+    for (const [repo, nums] of Object.entries(byRepo())) {
+      await bulkTriageCi(nums, repo, true);
+    }
+  });
+
   const handleTag = (tag) => runBulk(`Tagged "${tag}"`, async () => {
     for (const pr of selectedPrs) {
       await addPRTag(prNumberOf(pr), tag, pr.repo_name);
@@ -84,6 +90,10 @@ export default function BulkActionBar({ selectedPrs, onClear, onTagsChanged }) {
       <div className="bulk-actions">
         <button className="btn btn-primary" onClick={handleAnalyze} disabled={busy}>
           ⚡ Batch AI Review
+        </button>
+
+        <button className="btn btn-secondary" onClick={handleCiTriage} disabled={busy}>
+          🛠️ Diagnose CI
         </button>
 
         <div className="bulk-menu-wrapper">

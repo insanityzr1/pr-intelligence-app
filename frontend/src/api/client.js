@@ -358,3 +358,49 @@ export async function removePrFromGroup(groupId, prNumber, repoName = null) {
   }
   return res.json();
 }
+
+// ---- CI Failure Triage & Remediation --------------------------------------
+
+export async function triageCi(prNumber, repoName = null, { customLog = null, force = false } = {}) {
+  const res = await apiFetch(`${API_BASE}/prs/${prNumber}/ci-triage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repo_name: repoName, custom_log: customLog, force })
+  });
+  if (!res.ok) throw await apiError(res, `Failed to triage CI failure for PR #${prNumber}`);
+  return res.json();
+}
+
+export async function bulkTriageCi(prNumbers = [], repoName = null, force = false) {
+  const res = await apiFetch(`${API_BASE}/prs/bulk/ci-triage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pr_numbers: prNumbers, repo_name: repoName, force })
+  });
+  if (!res.ok) throw await apiError(res, 'Failed to perform bulk CI triage');
+  return res.json();
+}
+
+export async function applyCiFix(prNumber, { patch, action = 'push_to_pr', commitMessage = null, repoName = null, branchName = null } = {}) {
+  const res = await apiFetch(`${API_BASE}/prs/${prNumber}/apply-fix`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      patch,
+      action,
+      commit_message: commitMessage,
+      repo_name: repoName,
+      branch_name: branchName
+    })
+  });
+  if (!res.ok) throw await apiError(res, `Failed to apply fix for PR #${prNumber}`);
+  return res.json();
+}
+
+export function downloadCiPatchUrl(prNumber, repoName = null) {
+  const params = new URLSearchParams();
+  if (repoName) params.set('repo_name', repoName);
+  const q = params.toString();
+  return `${API_BASE}/prs/${prNumber}/download-patch${q ? `?${q}` : ''}`;
+}
+
